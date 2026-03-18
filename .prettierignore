@@ -1,0 +1,10 @@
+﻿dist/
+dist-tests/
+release/
+release-*/
+node_modules/
+.cache/
+coverage/
+licenses/
+resources/bin/
+package-lock.json

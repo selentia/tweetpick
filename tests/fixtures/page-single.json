@@ -1,0 +1,69 @@
+{
+  "data": {
+    "retweeters_timeline": {
+      "timeline": {
+        "instructions": [
+          {
+            "type": "TimelineAddEntries",
+            "entries": [
+              {
+                "entryId": "entry-1",
+                "sortIndex": "1",
+                "content": {
+                  "__typename": "TimelineTimelineItem",
+                  "entryType": "TimelineTimelineItem",
+                  "itemContent": {
+                    "__typename": "TimelineUser",
+                    "user_results": {
+                      "result": {
+                        "__typename": "User",
+                        "rest_id": "100",
+                        "core": {
+                          "screen_name": "riko",
+                          "name": "Riko"
+                        },
+                        "relationship_perspectives": {
+                          "followed_by": true
+                        },
+                        "privacy": {
+                          "protected": false
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "entryId": "entry-2",
+                "sortIndex": "2",
+                "content": {
+                  "__typename": "TimelineTimelineItem",
+                  "entryType": "TimelineTimelineItem",
+                  "itemContent": {
+                    "__typename": "TimelineUser",
+                    "user_results": {
+                      "result": {
+                        "__typename": "User",
+                        "rest_id": "101",
+                        "core": {
+                          "screen_name": "tabi",
+                          "name": "Tabi"
+                        },
+                        "relationship_perspectives": {
+                          "followed_by": false
+                        },
+                        "privacy": {
+                          "protected": false
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

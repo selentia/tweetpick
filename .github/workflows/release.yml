@@ -1,0 +1,80 @@
+name: Build & Release (Windows)
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Verify
+        run: npm run verify
+
+      - name: Build dist
+        run: npm run dist
+        env:
+          TWITTER_BEARER: ${{ secrets.TWITTER_BEARER || vars.TWITTER_BEARER }}
+          TWITTER_RETWEETERS_OP_ID: ${{ secrets.TWITTER_RETWEETERS_OP_ID || vars.TWITTER_RETWEETERS_OP_ID }}
+          TWITTER_SEARCH_TIMELINE_OP_ID: ${{ secrets.TWITTER_SEARCH_TIMELINE_OP_ID || vars.TWITTER_SEARCH_TIMELINE_OP_ID }}
+          TWITTER_TWEET_DETAIL_OP_ID: ${{ secrets.TWITTER_TWEET_DETAIL_OP_ID || vars.TWITTER_TWEET_DETAIL_OP_ID }}
+          TWITTER_RETWEETERS_FEATURES_JSON: ${{ secrets.TWITTER_RETWEETERS_FEATURES_JSON || vars.TWITTER_RETWEETERS_FEATURES_JSON }}
+          TWITTER_TWEET_DETAIL_FIELD_TOGGLES_JSON: ${{ secrets.TWITTER_TWEET_DETAIL_FIELD_TOGGLES_JSON || vars.TWITTER_TWEET_DETAIL_FIELD_TOGGLES_JSON }}
+
+      - name: Generate release checksums
+        shell: pwsh
+        run: |
+          $assetPatterns = @("release/*.exe", "release/*.zip", "release/*.msi")
+          $assets = @()
+          foreach ($pattern in $assetPatterns) {
+            $assets += Get-ChildItem -Path $pattern -File -ErrorAction SilentlyContinue
+          }
+
+          if ($assets.Count -eq 0) {
+            throw "No release assets found for checksum generation."
+          }
+
+          foreach ($asset in $assets) {
+            $hash = (Get-FileHash -Path $asset.FullName -Algorithm SHA256).Hash.ToLower()
+            $checksumLine = "$hash  $($asset.Name)`n"
+            [System.IO.File]::WriteAllText("$($asset.FullName).sha256", $checksumLine, [System.Text.Encoding]::ASCII)
+            Write-Host "Generated checksum: $($asset.Name).sha256"
+          }
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-dist
+          path: |
+            release/*.exe
+            release/*.zip
+            release/*.msi
+            release/*.sha256
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release/*.exe
+            release/*.zip
+            release/*.msi
+            release/*.sha256

@@ -1,0 +1,404 @@
+﻿<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: file:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+    />
+    <title>TweetPick</title>
+    <link rel="icon" type="image/svg+xml" href="./assets/icons/app-icon.svg" />
+    <link rel="stylesheet" href="./styles/app.css" />
+  </head>
+  <body>
+    <div id="app-root" class="app-root">
+      <main class="app-shell">
+        <header id="window-chrome" class="window-chrome">
+          <div class="window-chrome-top">
+            <div class="window-brand no-drag">
+              <img class="window-brand-icon" src="./assets/icons/app-icon.svg" alt="" draggable="false" />
+              <span class="window-brand-title">TweetPick</span>
+            </div>
+
+            <div class="window-chrome-right no-drag">
+              <details id="chrome-menu" class="chrome-menu">
+                <summary class="chrome-settings-trigger has-tooltip" data-tooltip="메뉴 열기" aria-label="메뉴 열기">
+                  <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+                    <path
+                      fill="currentColor"
+                      fill-rule="evenodd"
+                      d="M9.405 1.05c-.413-1.4-2.397-1.4-2.81 0l-.1.34a1.464 1.464 0 0 1-2.105.872l-.31-.17c-1.3-.71-2.8.79-2.09 2.09l.17.31c.446.82.023 1.84-.872 2.105l-.34.1c-1.4.413-1.4 2.397 0 2.81l.34.1c.895.264 1.318 1.285.872 2.105l-.17.31c-.71 1.3.79 2.8 2.09 2.09l.31-.17c.82-.446 1.84-.023 2.105.872l.1.34c.413 1.4 2.397 1.4 2.81 0l.1-.34a1.464 1.464 0 0 1 2.105-.872l.31.17c1.3.71 2.8-.79 2.09-2.09l-.17-.31a1.464 1.464 0 0 1 .872-2.105l.34-.1c1.4-.413 1.4-2.397 0-2.81l-.34-.1a1.464 1.464 0 0 1-.872-2.105l.17-.31c.71-1.3-.79-2.8-2.09-2.09l-.31.17a1.464 1.464 0 0 1-2.105-.872l-.1-.34zM8 10.93a2.93 2.93 0 1 0 0-5.86 2.93 2.93 0 0 0 0 5.86z"
+                      clip-rule="evenodd"
+                    />
+                  </svg>
+                </summary>
+
+                <div class="chrome-menu-body chrome-menu-body--right">
+                  <div class="chrome-menu-group">
+                    <div class="chrome-menu-group-label">도움말</div>
+                    <button id="menu-open-info" class="chrome-menu-item" type="button">사용 방법 열기</button>
+                    <button id="menu-open-legal" class="chrome-menu-item" type="button">라이선스</button>
+                  </div>
+                </div>
+              </details>
+
+              <button
+                id="window-minimize"
+                type="button"
+                class="chrome-control control-minimize has-tooltip"
+                data-tooltip="최소화"
+                aria-label="최소화"
+              >
+                <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+                  <path d="M4 8.5h8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="square" />
+                </svg>
+              </button>
+
+              <button
+                id="window-maximize"
+                type="button"
+                class="chrome-control control-maximize has-tooltip"
+                data-tooltip="최대화"
+                aria-label="최대화"
+              >
+                <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+                  <rect x="3.5" y="3.5" width="9" height="9" fill="none" stroke="currentColor" stroke-width="1.4" />
+                </svg>
+              </button>
+
+              <button
+                id="window-close"
+                type="button"
+                class="chrome-control control-close has-tooltip"
+                data-tooltip="닫기"
+                aria-label="닫기"
+              >
+                <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+                  <path
+                    d="M4.2 4.2l7.6 7.6M11.8 4.2l-7.6 7.6"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.4"
+                    stroke-linecap="square"
+                  />
+                </svg>
+              </button>
+            </div>
+          </div>
+        </header>
+
+        <section class="toolbar">
+          <div class="toolbar-actions">
+            <button id="draw-button" class="btn primary" type="submit" form="draw-form">
+              <span class="btn-icon" aria-hidden="true">
+                <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+                  <path d="M4.5 3.5v13l11-6.5z" />
+                </svg>
+              </span>
+              <span>추첨 시작</span>
+            </button>
+
+            <button id="copy-button" class="btn ghost" type="button" disabled>
+              <span class="btn-icon" aria-hidden="true">
+                <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+                  <path d="M7 2.5h8.5a2 2 0 0 1 2 2V13h-1.5V4.5a.5.5 0 0 0-.5-.5H7z" />
+                  <path
+                    d="M4.5 5A2.5 2.5 0 0 0 2 7.5v8A2.5 2.5 0 0 0 4.5 18h7A2.5 2.5 0 0 0 14 15.5v-8A2.5 2.5 0 0 0 11.5 5z"
+                  />
+                </svg>
+              </span>
+              <span>결과 텍스트 복사</span>
+            </button>
+
+            <button id="save-image-button" class="btn ghost" type="button" disabled>
+              <span class="btn-icon" aria-hidden="true">
+                <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+                  <path d="M10 2.5 5.2 7.3l1.1 1.1L9.2 5.5V13h1.6V5.5l2.9 2.9 1.1-1.1z" />
+                  <path
+                    d="M3.5 11.5v3A2.5 2.5 0 0 0 6 17h8a2.5 2.5 0 0 0 2.5-2.5v-3H15v3a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-3z"
+                  />
+                </svg>
+              </span>
+              <span>결과 이미지 저장</span>
+            </button>
+
+            <button id="link-info" class="btn ghost" type="button">안내</button>
+          </div>
+        </section>
+
+        <section class="workspace">
+          <section class="left-stack">
+            <section class="input-panel">
+              <form id="draw-form" class="draw-form" novalidate>
+                <div class="panel-title">추첨 조건</div>
+
+                <div class="form-section">
+                  <div class="form-section-title">인증 정보</div>
+
+                  <label class="control-line" for="auth-token">
+                    <span class="control-label">auth_token</span>
+                    <input
+                      id="auth-token"
+                      name="authToken"
+                      class="compact-field compact-auth"
+                      type="password"
+                      autocomplete="off"
+                      spellcheck="false"
+                      required
+                    />
+                  </label>
+                  <small id="error-auth-token" class="field-error" hidden></small>
+
+                  <label class="control-line" for="ct0">
+                    <span class="control-label">ct0</span>
+                    <input
+                      id="ct0"
+                      name="ct0"
+                      class="compact-field compact-auth"
+                      type="password"
+                      autocomplete="off"
+                      spellcheck="false"
+                      required
+                    />
+                  </label>
+                  <small id="error-ct0" class="field-error" hidden></small>
+                </div>
+
+                <div class="form-section">
+                  <div class="form-section-title">대상 게시물</div>
+
+                  <label class="control-line" for="tweet-url">
+                    <span class="control-label">트윗 링크</span>
+                    <input
+                      id="tweet-url"
+                      name="tweetUrl"
+                      class="compact-field compact-url"
+                      type="url"
+                      placeholder="https://x.com/&lt;작성자&gt;/status/&lt;트윗ID&gt;"
+                      autocomplete="off"
+                      spellcheck="false"
+                      required
+                    />
+                  </label>
+                  <small id="error-tweet-url" class="field-error" hidden></small>
+                </div>
+
+                <div class="form-section">
+                  <div class="form-section-title">추첨 설정</div>
+                  <label class="control-line" for="winners">
+                    <span class="control-label">추첨 인원</span>
+                    <input
+                      id="winners"
+                      name="winners"
+                      class="compact-field compact-count"
+                      type="number"
+                      min="1"
+                      step="1"
+                      value="1"
+                      inputmode="numeric"
+                      required
+                    />
+                  </label>
+                  <small id="error-winners" class="field-error" hidden></small>
+
+                  <div class="settings-stack">
+                    <div class="settings-group">
+                      <div class="settings-group-title">집계 대상</div>
+                      <div class="check-row-set">
+                        <label class="check-line" for="source-rt">
+                          <input id="source-rt" type="checkbox" checked />
+                          <span>리트윗</span>
+                        </label>
+                        <label class="check-line" for="source-quote">
+                          <input id="source-quote" type="checkbox" />
+                          <span>인용</span>
+                        </label>
+                        <label class="check-line" for="source-reply">
+                          <input id="source-reply" type="checkbox" />
+                          <span>답글</span>
+                        </label>
+                      </div>
+
+                      <div class="check-row-set source-match-row">
+                        <label class="check-line" for="source-match-any">
+                          <input id="source-match-any" name="source-match-mode" type="radio" checked />
+                          <span>합집합</span>
+                        </label>
+                        <label class="check-line" for="source-match-all">
+                          <input id="source-match-all" name="source-match-mode" type="radio" />
+                          <span>교집합</span>
+                        </label>
+                      </div>
+                    </div>
+
+                    <div class="settings-group">
+                      <div class="settings-group-title">텍스트 조건</div>
+                      <label class="control-line" for="filter-keyword">
+                        <span class="control-label">키워드</span>
+                        <input
+                          id="filter-keyword"
+                          class="compact-field compact-url"
+                          type="text"
+                          placeholder="인용/답글 텍스트 포함 키워드"
+                          autocomplete="off"
+                        />
+                      </label>
+                    </div>
+
+                    <div class="settings-group">
+                      <div class="settings-group-title">계정 조건</div>
+                      <div class="toggle-line">
+                        <label class="check-line" for="filter-require-participant-follows-auth">
+                          <input id="filter-require-participant-follows-auth" type="checkbox" />
+                          <span>참여자 → 기준 계정 팔로우</span>
+                        </label>
+                      </div>
+
+                      <div class="toggle-line">
+                        <label class="check-line" for="filter-require-auth-follows-participant">
+                          <input id="filter-require-auth-follows-participant" type="checkbox" />
+                          <span>기준 계정 → 참여자 팔로우</span>
+                        </label>
+                      </div>
+
+                      <div class="toggle-line">
+                        <label class="check-line" for="filter-min-followers-enabled">
+                          <input id="filter-min-followers-enabled" type="checkbox" />
+                          <span>팔로워 수 조건</span>
+                        </label>
+                        <label class="mini-input" for="filter-min-followers">
+                          <span>최소</span>
+                          <input
+                            id="filter-min-followers"
+                            class="compact-field compact-mini"
+                            type="number"
+                            min="0"
+                            step="1"
+                            value="50"
+                            inputmode="numeric"
+                          />
+                        </label>
+                      </div>
+                      <p class="settings-note">※ 기준 계정은 입력한 auth_token/ct0 소유 계정입니다.</p>
+                    </div>
+                  </div>
+                </div>
+
+                <p id="error-form-global" class="field-error field-error-global" hidden></p>
+              </form>
+            </section>
+
+            <article id="result-panel" class="result-panel">
+              <div class="result-panel-head">
+                <h2 class="panel-title">추첨 결과</h2>
+                <button
+                  id="toggle-stats-button"
+                  class="btn ghost btn-inline"
+                  type="button"
+                  aria-expanded="false"
+                  disabled
+                >
+                  상세 통계
+                </button>
+              </div>
+              <p id="result-empty" class="result-empty">추첨 대기 상태입니다.</p>
+
+              <div id="result-content" class="result-content" hidden>
+                <div class="summary-grid">
+                  <div class="summary-row">
+                    <span>기준 트윗</span>
+                    <strong id="summary-target">-</strong>
+                  </div>
+                  <div class="summary-row">
+                    <span>참여자</span>
+                    <strong id="summary-unique">-</strong>
+                  </div>
+                  <div class="summary-row">
+                    <span>추첨 인원</span>
+                    <strong id="summary-winners">-</strong>
+                  </div>
+                </div>
+
+                <div class="result-table-wrap">
+                  <table class="result-table">
+                    <caption class="sr-only">
+                      당첨자 목록
+                    </caption>
+                    <thead>
+                      <tr>
+                        <th scope="col">#</th>
+                        <th scope="col">아이디</th>
+                        <th scope="col">닉네임</th>
+                      </tr>
+                    </thead>
+                    <tbody id="winner-rows"></tbody>
+                  </table>
+                </div>
+
+                <div id="stats-section" class="stats-section hidden">
+                  <div class="stats-grid">
+                    <div class="stats-block">
+                      <div class="stats-title">소스 통계</div>
+                      <div id="source-stat-rt" class="stats-line">RT: -</div>
+                      <div id="source-stat-quote" class="stats-line">인용: -</div>
+                      <div id="source-stat-reply" class="stats-line">답글: -</div>
+                    </div>
+
+                    <div class="stats-block">
+                      <div class="stats-title">필터 통계</div>
+                      <div id="filter-stat-intersection" class="stats-line">소스 통과: -</div>
+                      <div id="filter-stat-after-keyword" class="stats-line">키워드 통과: -</div>
+                      <div id="filter-stat-after-profile" class="stats-line">최종 대상: -</div>
+                      <div id="filter-stat-excluded-keyword" class="stats-line">키워드 제외: -</div>
+                      <div id="filter-stat-excluded-profile" class="stats-line">조건 제외: -</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </article>
+          </section>
+
+          <article class="log-panel">
+            <h2 class="panel-title">로그</h2>
+            <div id="log-box" class="log-box" aria-live="polite"></div>
+          </article>
+        </section>
+
+        <footer class="app-social-footer">
+          <button
+            id="link-github"
+            class="social-link-btn has-tooltip"
+            data-tooltip="깃허브 열기"
+            type="button"
+            aria-label="깃허브 열기"
+          >
+            <img
+              class="social-link-icon"
+              src="./assets/icons/github_icon.png"
+              alt=""
+              aria-hidden="true"
+              draggable="false"
+            />
+          </button>
+
+          <button
+            id="link-twitter"
+            class="social-link-btn has-tooltip"
+            data-tooltip="X 열기"
+            type="button"
+            aria-label="X 열기"
+          >
+            <img class="social-link-icon" src="./assets/icons/x_icon.png" alt="" aria-hidden="true" draggable="false" />
+          </button>
+        </footer>
+      </main>
+
+      <aside id="toast" class="toast hidden" aria-live="polite">
+        <div id="toast-message" class="toast-message"></div>
+        <button id="toast-close" class="toast-close" type="button" aria-label="닫기">×</button>
+      </aside>
+    </div>
+
+    <script type="module" src="./scripts/app.js"></script>
+  </body>
+</html>

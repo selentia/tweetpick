@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "module": "commonjs",
+    "rootDir": "src",
+    "outDir": "dist",
+    "types": ["node", "electron"]
+  },
+  "include": ["src/main/**/*.ts", "src/rt-draw/**/*.ts", "src/preload/**/*.ts", "src/types/**/*.ts"]
+}

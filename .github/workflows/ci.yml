@@ -1,0 +1,42 @@
+name: CI (Verify + Build)
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  verify-and-build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Verify
+        run: npm run verify
+
+      - name: Build
+        run: npm run build
+        env:
+          TWITTER_BEARER: ${{ secrets.TWITTER_BEARER || vars.TWITTER_BEARER }}
+          TWITTER_RETWEETERS_OP_ID: ${{ secrets.TWITTER_RETWEETERS_OP_ID || vars.TWITTER_RETWEETERS_OP_ID }}
+          TWITTER_SEARCH_TIMELINE_OP_ID: ${{ secrets.TWITTER_SEARCH_TIMELINE_OP_ID || vars.TWITTER_SEARCH_TIMELINE_OP_ID }}
+          TWITTER_TWEET_DETAIL_OP_ID: ${{ secrets.TWITTER_TWEET_DETAIL_OP_ID || vars.TWITTER_TWEET_DETAIL_OP_ID }}
+          TWITTER_RETWEETERS_FEATURES_JSON: ${{ secrets.TWITTER_RETWEETERS_FEATURES_JSON || vars.TWITTER_RETWEETERS_FEATURES_JSON }}
+          TWITTER_TWEET_DETAIL_FIELD_TOGGLES_JSON: ${{ secrets.TWITTER_TWEET_DETAIL_FIELD_TOGGLES_JSON || vars.TWITTER_TWEET_DETAIL_FIELD_TOGGLES_JSON }}

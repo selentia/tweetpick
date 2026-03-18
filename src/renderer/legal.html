@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: file:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+    />
+    <title>라이선스</title>
+    <link rel="stylesheet" href="./styles/info.css" />
+  </head>
+  <body>
+    <main class="info-shell">
+      <div class="info-content">
+        <section class="info-block legal-block">
+          <h2>라이선스</h2>
+          <article class="legal-doc">
+            <h3>NOTICE</h3>
+            <pre id="legal-notice" class="legal-text legal-text-notice">Loading NOTICE...</pre>
+          </article>
+          <article class="legal-doc">
+            <h3>LICENSE (Apache-2.0)</h3>
+            <pre id="legal-license" class="legal-text">Loading LICENSE...</pre>
+          </article>
+        </section>
+      </div>
+
+      <footer class="info-footer">
+        <button id="close-legal" class="footer-btn footer-btn-ghost" type="button">닫기</button>
+      </footer>
+    </main>
+
+    <script type="module" src="./scripts/legal.js"></script>
+  </body>
+</html>
