@@ -52,6 +52,7 @@ test('buildTweetDetailUrl encodes route, variables, features, and fieldToggles',
     withQuickPromoteEligibilityTweetFields: boolean;
     withBirdwatchNotes: boolean;
     withVoice: boolean;
+    withV2Timeline: boolean;
   };
   const features = JSON.parse(parsed.searchParams.get('features') as string) as {
     featureA: boolean;
@@ -72,6 +73,7 @@ test('buildTweetDetailUrl encodes route, variables, features, and fieldToggles',
   assert.equal(variables.withQuickPromoteEligibilityTweetFields, true);
   assert.equal(variables.withBirdwatchNotes, true);
   assert.equal(variables.withVoice, true);
+  assert.equal(variables.withV2Timeline, true);
   assert.equal(features.featureA, true);
   assert.equal(fieldToggles.toggleA, false);
 });

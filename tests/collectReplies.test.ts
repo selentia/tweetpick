@@ -19,6 +19,7 @@ interface ReplyTweetFactoryInput {
 
 interface ReplyTweetResult {
   rest_id: string;
+  __typename?: string;
   legacy: {
     id_str: string;
     in_reply_to_status_id_str: string;
@@ -47,12 +48,17 @@ interface ReplyTweetResult {
   };
 }
 
+interface ReplyTweetWithVisibilityResults {
+  __typename: 'TweetWithVisibilityResults';
+  tweet: ReplyTweetResult;
+}
+
 interface ReplyTimelineItemEntry {
   content: {
     entryType: 'TimelineTimelineItem';
     itemContent: {
       tweet_results: {
-        result: ReplyTweetResult;
+        result: ReplyTweetResult | ReplyTweetWithVisibilityResults;
       };
     };
   };
@@ -64,7 +70,7 @@ interface ReplyTimelineModuleItem {
     itemContent: {
       itemType: 'TimelineTweet';
       tweet_results: {
-        result: ReplyTweetResult;
+        result: ReplyTweetResult | ReplyTweetWithVisibilityResults;
       };
     };
   };
@@ -154,6 +160,13 @@ function makeTimelineItem(tweet: ReplyTweetResult): ReplyTimelineItemEntry {
         },
       },
     },
+  };
+}
+
+function makeVisibilityWrappedReplyTweet(tweet: ReplyTweetResult): ReplyTweetWithVisibilityResults {
+  return {
+    __typename: 'TweetWithVisibilityResults',
+    tweet,
   };
 }
 
@@ -252,6 +265,56 @@ test('parseReplyDetailPage includes direct replies from item and module, and cur
   assert.deepEqual(parsed.participants.map((item) => item.screenName).sort(), ['nana', 'riko']);
   assert.equal(parsed.cursors.length, 2);
   assert.deepEqual(parsed.cursors.map((item) => item.cursorType).sort(), ['Bottom', 'ShowMoreThreads']);
+});
+
+test('parseReplyDetailPage unwraps TweetWithVisibilityResults in item and module', () => {
+  const directItem = makeTweet({
+    tweetId: '211',
+    inReplyToStatusId: '999',
+    userId: '7',
+    screenName: 'item_user',
+    name: 'Item User',
+    fullText: 'wrapped item',
+  });
+  const directModule = makeTweet({
+    tweetId: '212',
+    inReplyToStatusId: '999',
+    userId: '8',
+    screenName: 'module_user',
+    name: 'Module User',
+    fullText: 'wrapped module',
+  });
+
+  const payload = makePayload([
+    {
+      content: {
+        entryType: 'TimelineTimelineItem',
+        itemContent: {
+          tweet_results: {
+            result: makeVisibilityWrappedReplyTweet(directItem),
+          },
+        },
+      },
+    },
+    makeModule([
+      {
+        entryId: `module-${directModule.rest_id}`,
+        item: {
+          itemContent: {
+            itemType: 'TimelineTweet',
+            tweet_results: {
+              result: makeVisibilityWrappedReplyTweet(directModule),
+            },
+          },
+        },
+      },
+    ]),
+  ]);
+
+  const parsed = parseReplyDetailPage(payload, '999');
+  assert.equal(parsed.participants.length, 2);
+  assert.deepEqual(parsed.participants.map((item) => item.screenName).sort(), ['item_user', 'module_user']);
+  assert.equal(parsed.warnings, 0);
 });
 
 test('collectReplies handles direct-reply filter, dedupe, author exclusion, and cursor loop', async () => {

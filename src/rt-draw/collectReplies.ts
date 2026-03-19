@@ -62,6 +62,7 @@ interface ReplyTweetLegacy {
 }
 
 interface ReplyTweetResult {
+  __typename?: unknown;
   core?: {
     user_results?: {
       result?: ReplyUserResult | null;
@@ -69,6 +70,13 @@ interface ReplyTweetResult {
   } | null;
   legacy?: ReplyTweetLegacy | null;
 }
+
+interface ReplyTweetWithVisibilityResults {
+  __typename?: unknown;
+  tweet?: ReplyTweetResult | null;
+}
+
+type ReplyTweetGraphqlResult = ReplyTweetResult | ReplyTweetWithVisibilityResults;
 
 interface ClientEventInfoCarrier {
   clientEventInfo?: {
@@ -88,7 +96,7 @@ interface ReplyTimelineCursorContent {
 interface ReplyTimelineItemContent extends ClientEventInfoCarrier {
   itemType?: unknown;
   tweet_results?: {
-    result?: ReplyTweetResult | null;
+    result?: ReplyTweetGraphqlResult | null;
   } | null;
   value?: unknown;
   cursorType?: unknown;
@@ -185,6 +193,30 @@ function normalizeHandle(handle: unknown): string {
 function toNumberOrNull(value: unknown): number | null {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function unwrapReplyTweetResult(result: ReplyTweetGraphqlResult | null | undefined): ReplyTweetResult | null {
+  if (!isRecord(result)) {
+    return null;
+  }
+
+  if (result.__typename === 'TweetWithVisibilityResults') {
+    const wrappedTweet = (result as ReplyTweetWithVisibilityResults).tweet;
+    return isRecord(wrappedTweet) ? (wrappedTweet as ReplyTweetResult) : null;
+  }
+
+  if ('tweet' in result) {
+    const wrappedTweet = (result as ReplyTweetWithVisibilityResults).tweet;
+    if (isRecord(wrappedTweet)) {
+      return wrappedTweet as ReplyTweetResult;
+    }
+  }
+
+  return result as ReplyTweetResult;
 }
 
 function extractUserFromTweet(tweet: ReplyTweetResult | null | undefined): ReplyUserResult | null {
@@ -322,7 +354,7 @@ function parseReplyDetailPage(
       }
 
       if (content.entryType === 'TimelineTimelineItem') {
-        const tweet = content.itemContent?.tweet_results?.result ?? null;
+        const tweet = unwrapReplyTweetResult(content.itemContent?.tweet_results?.result ?? null);
         pushTweetIfDirectReply({
           tweet,
           focalTweetId,
@@ -343,7 +375,7 @@ function parseReplyDetailPage(
         }
 
         if (item.itemContent.itemType === 'TimelineTweet') {
-          const tweet = item.itemContent.tweet_results?.result ?? null;
+          const tweet = unwrapReplyTweetResult(item.itemContent.tweet_results?.result ?? null);
           pushTweetIfDirectReply({
             tweet,
             focalTweetId,

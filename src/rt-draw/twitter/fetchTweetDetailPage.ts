@@ -42,6 +42,7 @@ function buildTweetDetailUrl({
     withQuickPromoteEligibilityTweetFields: true,
     withBirdwatchNotes: true,
     withVoice: true,
+    withV2Timeline: true,
   };
 
   if (cursor) {
