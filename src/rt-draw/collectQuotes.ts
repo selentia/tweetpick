@@ -10,6 +10,9 @@ import type {
 } from '@shared/rtDraw';
 
 const DEFAULT_MAX_PAGES = 120;
+const DEFAULT_MAX_NO_GROWTH_PAGES = 8;
+const DEFAULT_MAX_REPEAT_PAGE_SIGNATURES = 3;
+const DEFAULT_QUOTE_URL_QUERY_PAGE_SIZE = 100;
 
 const TERMINATION_REASONS = Object.freeze({
   UNKNOWN: 'unknown',
@@ -17,6 +20,8 @@ const TERMINATION_REASONS = Object.freeze({
   END_OF_TIMELINE: 'end_of_timeline',
   INVALID_OR_EMPTY_PAYLOAD: 'invalid_or_empty_payload',
   CURSOR_CYCLE: 'cursor_cycle',
+  REPEATED_PAGE: 'repeated_page',
+  NO_GROWTH: 'no_growth',
 });
 
 interface QuoteUserCore {
@@ -55,9 +60,18 @@ interface QuoteTweetCore {
 }
 
 interface QuoteTweetResult {
+  __typename?: unknown;
   core?: QuoteTweetCore | null;
   legacy?: QuoteTweetLegacy | null;
 }
+
+interface QuoteTweetWithVisibilityResults {
+  __typename?: unknown;
+  tweet?: QuoteTweetResult | null;
+}
+
+type QuoteTweetGraphqlResult = QuoteTweetResult | QuoteTweetWithVisibilityResults;
+type TerminationReason = (typeof TERMINATION_REASONS)[keyof typeof TERMINATION_REASONS];
 
 interface SearchTimelineEntryContent {
   entryType?: unknown;
@@ -65,7 +79,7 @@ interface SearchTimelineEntryContent {
   value?: unknown;
   itemContent?: {
     tweet_results?: {
-      result?: QuoteTweetResult | null;
+      result?: QuoteTweetGraphqlResult | null;
     } | null;
   } | null;
 }
@@ -75,6 +89,7 @@ interface SearchTimelineEntry {
 }
 
 interface SearchTimelineInstruction {
+  entry?: SearchTimelineEntry | null;
   entries?: SearchTimelineEntry[] | null;
 }
 
@@ -99,6 +114,7 @@ interface QuoteParticipant extends RtParticipant {
 interface ParsedQuoteSearchPage {
   participants: QuoteParticipant[];
   bottomCursor: string | null;
+  pageSignature: string;
   warnings: number;
 }
 
@@ -106,6 +122,13 @@ interface IngestParticipantsResult {
   addedOnPage: number;
   duplicatesSkipped: number;
   excludedAuthorCount: number;
+}
+
+interface QuoteSearchStrategy {
+  rawQuery: string;
+  querySource: string;
+  product: string;
+  count: number;
 }
 
 type FetchSearchTimelinePageOptions = SearchTimelineUrlOptions &
@@ -124,10 +147,14 @@ interface CollectQuotesOptions {
   tweetId: string;
   authorScreenName?: string | null;
   operationId: string;
+  querySource?: string;
+  product?: string;
   features?: Record<string, unknown>;
   headers?: HeadersInit;
   pageSize?: number;
   maxPages?: number;
+  maxNoGrowthPages?: number;
+  maxRepeatPageSignatures?: number;
   fetchPage?: SearchTimelineFetcher;
   onProgress?: (payload: SourceCollectionProgress) => void;
   onRetry?: (retry: RetryHandlerInfo) => void;
@@ -140,9 +167,22 @@ function normalizeHandle(handle: unknown): string {
   return String(handle).trim().replace(/^@+/, '').toLowerCase();
 }
 
+function normalizeNonEmptyString(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
 function toNumberOrNull(value: unknown): number | null {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
 }
 
 function extractUserFromTweet(tweet: QuoteTweetResult | null | undefined): QuoteUserResult | null {
@@ -200,6 +240,9 @@ function extractTimelineEntries(payload: QuoteSearchPayload | null | undefined):
     if (Array.isArray(instruction.entries)) {
       entries.push(...instruction.entries);
     }
+    if (instruction.entry && isRecord(instruction.entry)) {
+      entries.push(instruction.entry);
+    }
   }
 
   return {
@@ -208,8 +251,28 @@ function extractTimelineEntries(payload: QuoteSearchPayload | null | undefined):
   };
 }
 
+function unwrapTweetResult(result: QuoteTweetGraphqlResult | null | undefined): QuoteTweetResult | null {
+  if (!isRecord(result)) {
+    return null;
+  }
+
+  if (result.__typename === 'TweetWithVisibilityResults') {
+    const wrappedTweet = (result as QuoteTweetWithVisibilityResults).tweet;
+    return isRecord(wrappedTweet) ? (wrappedTweet as QuoteTweetResult) : null;
+  }
+
+  if ('tweet' in result) {
+    const wrappedTweet = (result as QuoteTweetWithVisibilityResults).tweet;
+    if (isRecord(wrappedTweet)) {
+      return wrappedTweet as QuoteTweetResult;
+    }
+  }
+
+  return result as QuoteTweetResult;
+}
+
 function extractTweetResultFromEntry(entry: SearchTimelineEntry | null | undefined): QuoteTweetResult | null {
-  return entry?.content?.itemContent?.tweet_results?.result ?? null;
+  return unwrapTweetResult(entry?.content?.itemContent?.tweet_results?.result ?? null);
 }
 
 function parseQuoteSearchPage(payload: QuoteSearchPayload | null | undefined, tweetId: string): ParsedQuoteSearchPage {
@@ -259,6 +322,7 @@ function parseQuoteSearchPage(payload: QuoteSearchPayload | null | undefined, tw
   return {
     participants,
     bottomCursor,
+    pageSignature: participants.map((participant) => participant.userId).join(','),
     warnings,
   };
 }
@@ -329,15 +393,145 @@ function readPositiveInt(value: unknown, fallback: number, label: string): numbe
   return parsed;
 }
 
+function getNoCursorTerminationReason(parsed: ParsedQuoteSearchPage): TerminationReason {
+  return parsed.participants.length === 0 && parsed.warnings > 0
+    ? TERMINATION_REASONS.INVALID_OR_EMPTY_PAYLOAD
+    : TERMINATION_REASONS.END_OF_TIMELINE;
+}
+
+function isRepeatedSignature(
+  pageSignature: string,
+  seenPageSignatures: Map<string, number>,
+  threshold: number
+): boolean {
+  if (!pageSignature) {
+    return false;
+  }
+
+  const signatureCount = (seenPageSignatures.get(pageSignature) || 0) + 1;
+  seenPageSignatures.set(pageSignature, signatureCount);
+  return signatureCount >= threshold;
+}
+
+function createDefaultSearchStrategies({
+  tweetId,
+  authorScreenName,
+  pageSize,
+}: {
+  tweetId: string;
+  authorScreenName?: string | null;
+  pageSize: number;
+}): QuoteSearchStrategy[] {
+  const strategies: QuoteSearchStrategy[] = [
+    {
+      rawQuery: `quoted_tweet_id:${tweetId}`,
+      querySource: 'tdqt',
+      product: 'Top',
+      count: pageSize,
+    },
+    {
+      rawQuery: `quoted_tweet_id:${tweetId}`,
+      querySource: 'typed_query',
+      product: 'Latest',
+      count: pageSize,
+    },
+  ];
+
+  const author = normalizeHandle(authorScreenName);
+  if (author) {
+    const quoteUrlPageSize = Math.max(pageSize, DEFAULT_QUOTE_URL_QUERY_PAGE_SIZE);
+    strategies.push(
+      {
+        rawQuery: `url:"https://x.com/${author}/status/${tweetId}" filter:quote`,
+        querySource: 'typed_query',
+        product: 'Latest',
+        count: quoteUrlPageSize,
+      },
+      {
+        rawQuery: `url:"https://twitter.com/${author}/status/${tweetId}" filter:quote`,
+        querySource: 'typed_query',
+        product: 'Latest',
+        count: quoteUrlPageSize,
+      }
+    );
+  }
+
+  return strategies;
+}
+
+function dedupeSearchStrategies(strategies: QuoteSearchStrategy[]): QuoteSearchStrategy[] {
+  const deduped: QuoteSearchStrategy[] = [];
+  const seen = new Set<string>();
+
+  for (const strategy of strategies) {
+    const key = `${strategy.rawQuery}|||${strategy.querySource}|||${strategy.product}|||${strategy.count}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    deduped.push(strategy);
+  }
+
+  return deduped;
+}
+
+function resolveSearchStrategies({
+  tweetId,
+  authorScreenName,
+  pageSize,
+  querySource,
+  product,
+}: {
+  tweetId: string;
+  authorScreenName?: string | null;
+  pageSize: number;
+  querySource: string | null;
+  product: string | null;
+}): QuoteSearchStrategy[] {
+  const defaultStrategies = createDefaultSearchStrategies({
+    tweetId,
+    authorScreenName,
+    pageSize,
+  });
+
+  if (!querySource && !product) {
+    return dedupeSearchStrategies(defaultStrategies);
+  }
+
+  const primaryStrategy = defaultStrategies[0];
+  if (!primaryStrategy) {
+    return [];
+  }
+
+  const patchedStrategies: QuoteSearchStrategy[] = [
+    {
+      ...primaryStrategy,
+      querySource: querySource || primaryStrategy.querySource,
+      product: product || primaryStrategy.product,
+    },
+    ...defaultStrategies.slice(1),
+  ];
+
+  return dedupeSearchStrategies(patchedStrategies);
+}
+
+function shouldFallbackToNextStrategy(reason: TerminationReason): boolean {
+  return reason !== TERMINATION_REASONS.MAX_PAGES && reason !== TERMINATION_REASONS.UNKNOWN;
+}
+
 async function collectQuotes(options: CollectQuotesOptions): Promise<SourceCollectionResult<QuoteParticipant>> {
   const {
     tweetId,
     authorScreenName,
     operationId,
+    querySource,
+    product,
     features,
     headers,
     pageSize = 20,
     maxPages = DEFAULT_MAX_PAGES,
+    maxNoGrowthPages = DEFAULT_MAX_NO_GROWTH_PAGES,
+    maxRepeatPageSignatures = DEFAULT_MAX_REPEAT_PAGE_SIGNATURES,
     fetchPage = fetchSearchTimelinePage as SearchTimelineFetcher,
     onProgress,
     onRetry,
@@ -351,8 +545,24 @@ async function collectQuotes(options: CollectQuotesOptions): Promise<SourceColle
   }
 
   const safeMaxPages = readPositiveInt(maxPages, DEFAULT_MAX_PAGES, 'maxPages');
+  const safePageSize = readPositiveInt(pageSize, 20, 'pageSize');
+  const safeMaxNoGrowthPages = readPositiveInt(maxNoGrowthPages, DEFAULT_MAX_NO_GROWTH_PAGES, 'maxNoGrowthPages');
+  const safeMaxRepeatPageSignatures = readPositiveInt(
+    maxRepeatPageSignatures,
+    DEFAULT_MAX_REPEAT_PAGE_SIGNATURES,
+    'maxRepeatPageSignatures'
+  );
+  const querySourceOverride = normalizeNonEmptyString(querySource);
+  const productOverride = normalizeNonEmptyString(product);
+  const searchStrategies = resolveSearchStrategies({
+    tweetId,
+    authorScreenName,
+    pageSize: safePageSize,
+    querySource: querySourceOverride,
+    product: productOverride,
+  });
+
   const participantsByUserId = new Map<string, QuoteParticipant>();
-  const seenCursors = new Set<string>();
   const normalizedAuthor = normalizeHandle(authorScreenName);
 
   let pagesFetched = 0;
@@ -361,60 +571,114 @@ async function collectQuotes(options: CollectQuotesOptions): Promise<SourceColle
   let excludedAuthorCount = 0;
   let schemaWarnings = 0;
   let loopDetected = false;
-  let terminationReason: string = TERMINATION_REASONS.UNKNOWN;
-  let cursor: string | null = null;
+  let noGrowthStreak = 0;
+  let terminationReason: TerminationReason = TERMINATION_REASONS.UNKNOWN;
 
-  while (true) {
-    if (pagesFetched >= safeMaxPages) {
-      terminationReason = TERMINATION_REASONS.MAX_PAGES;
+  let strategyIndex = 0;
+  while (strategyIndex < searchStrategies.length) {
+    const strategy = searchStrategies[strategyIndex];
+    if (!strategy) {
+      break;
+    }
+    const seenCursors = new Set<string>();
+    const seenPageSignatures = new Map<string, number>();
+
+    let cursor: string | null = null;
+    let stageNoGrowthStreak = 0;
+    let stageTerminationReason: TerminationReason = TERMINATION_REASONS.UNKNOWN;
+
+    while (true) {
+      if (pagesFetched >= safeMaxPages) {
+        terminationReason = TERMINATION_REASONS.MAX_PAGES;
+        break;
+      }
+
+      pagesFetched += 1;
+      const { payload } = await fetchPage({
+        operationId,
+        rawQuery: strategy.rawQuery,
+        count: strategy.count,
+        cursor,
+        querySource: strategy.querySource,
+        product: strategy.product,
+        features,
+        headers,
+        onRetry,
+      });
+
+      const parsed = parseQuoteSearchPage(payload, tweetId);
+      schemaWarnings += parsed.warnings;
+      totalCollectedRaw += parsed.participants.length;
+
+      const ingest = ingestParticipants({
+        parsedParticipants: parsed.participants,
+        participantsByUserId,
+        normalizedAuthor,
+      });
+      duplicatesSkipped += ingest.duplicatesSkipped;
+      excludedAuthorCount += ingest.excludedAuthorCount;
+      stageNoGrowthStreak = ingest.addedOnPage > 0 ? 0 : stageNoGrowthStreak + 1;
+
+      const repeatedSignatureDetected = isRepeatedSignature(
+        parsed.pageSignature,
+        seenPageSignatures,
+        safeMaxRepeatPageSignatures
+      );
+
+      onProgress?.({
+        pagesFetched,
+        totalCollectedRaw,
+        totalUnique: participantsByUserId.size,
+        addedOnPage: ingest.addedOnPage,
+        noGrowthStreak: stageNoGrowthStreak,
+        nextCursor: parsed.bottomCursor,
+      });
+
+      if (!parsed.bottomCursor) {
+        stageTerminationReason = getNoCursorTerminationReason(parsed);
+        break;
+      }
+
+      if (parsed.bottomCursor === cursor || seenCursors.has(parsed.bottomCursor)) {
+        loopDetected = true;
+        stageTerminationReason = TERMINATION_REASONS.CURSOR_CYCLE;
+        break;
+      }
+
+      if (repeatedSignatureDetected) {
+        loopDetected = true;
+        stageTerminationReason = TERMINATION_REASONS.REPEATED_PAGE;
+        break;
+      }
+
+      if (stageNoGrowthStreak >= safeMaxNoGrowthPages) {
+        stageTerminationReason = TERMINATION_REASONS.NO_GROWTH;
+        break;
+      }
+
+      seenCursors.add(parsed.bottomCursor);
+      cursor = parsed.bottomCursor;
+    }
+
+    noGrowthStreak = stageNoGrowthStreak;
+
+    if (terminationReason === TERMINATION_REASONS.MAX_PAGES) {
       break;
     }
 
-    pagesFetched += 1;
-    const { payload } = await fetchPage({
-      operationId,
-      rawQuery: `quoted_tweet_id:${tweetId}`,
-      count: pageSize,
-      cursor,
-      features,
-      headers,
-      onRetry,
-    });
-
-    const parsed = parseQuoteSearchPage(payload, tweetId);
-    schemaWarnings += parsed.warnings;
-    totalCollectedRaw += parsed.participants.length;
-
-    const ingest = ingestParticipants({
-      parsedParticipants: parsed.participants,
-      participantsByUserId,
-      normalizedAuthor,
-    });
-    duplicatesSkipped += ingest.duplicatesSkipped;
-    excludedAuthorCount += ingest.excludedAuthorCount;
-
-    onProgress?.({
-      pagesFetched,
-      totalCollectedRaw,
-      totalUnique: participantsByUserId.size,
-      addedOnPage: ingest.addedOnPage,
-      nextCursor: parsed.bottomCursor,
-    });
-
-    if (!parsed.bottomCursor) {
-      terminationReason =
-        parsed.warnings > 0 ? TERMINATION_REASONS.INVALID_OR_EMPTY_PAYLOAD : TERMINATION_REASONS.END_OF_TIMELINE;
-      break;
+    const hasNextStrategy = strategyIndex + 1 < searchStrategies.length;
+    if (hasNextStrategy && shouldFallbackToNextStrategy(stageTerminationReason)) {
+      strategyIndex += 1;
+      continue;
     }
 
-    if (parsed.bottomCursor === cursor || seenCursors.has(parsed.bottomCursor)) {
-      loopDetected = true;
-      terminationReason = TERMINATION_REASONS.CURSOR_CYCLE;
-      break;
-    }
+    terminationReason = stageTerminationReason;
+    break;
+  }
 
-    seenCursors.add(parsed.bottomCursor);
-    cursor = parsed.bottomCursor;
+  if (terminationReason === TERMINATION_REASONS.UNKNOWN) {
+    terminationReason =
+      pagesFetched === 0 ? TERMINATION_REASONS.INVALID_OR_EMPTY_PAYLOAD : TERMINATION_REASONS.END_OF_TIMELINE;
   }
 
   return {
@@ -427,9 +691,19 @@ async function collectQuotes(options: CollectQuotesOptions): Promise<SourceColle
       excludedAuthorCount,
       schemaWarnings,
       loopDetected,
+      noGrowthStreak,
       terminationReason,
     },
   };
 }
 
-export { DEFAULT_MAX_PAGES, TERMINATION_REASONS, extractTimelineEntries, parseQuoteSearchPage, collectQuotes };
+export {
+  DEFAULT_MAX_PAGES,
+  DEFAULT_MAX_NO_GROWTH_PAGES,
+  DEFAULT_MAX_REPEAT_PAGE_SIGNATURES,
+  DEFAULT_QUOTE_URL_QUERY_PAGE_SIZE,
+  TERMINATION_REASONS,
+  extractTimelineEntries,
+  parseQuoteSearchPage,
+  collectQuotes,
+};

@@ -44,6 +44,11 @@ interface QuoteTweetResult {
   };
 }
 
+interface QuoteTweetWithVisibilityResults {
+  __typename: 'TweetWithVisibilityResults';
+  tweet: QuoteTweetResult;
+}
+
 interface SearchTimelineCursorEntry {
   content: {
     entryType: 'TimelineTimelineCursor';
@@ -57,10 +62,20 @@ interface SearchTimelineItemEntry {
     entryType: 'TimelineTimelineItem';
     itemContent: {
       tweet_results: {
-        result: QuoteTweetResult;
+        result: QuoteTweetResult | QuoteTweetWithVisibilityResults;
       };
     };
   };
+}
+
+interface SearchTimelineReplaceCursorInstruction {
+  type: 'TimelineReplaceEntry';
+  entry: SearchTimelineCursorEntry;
+  entry_id_to_replace: string;
+}
+
+interface SearchTimelineEntriesInstruction {
+  entries: Array<SearchTimelineItemEntry | SearchTimelineCursorEntry>;
 }
 
 interface QuoteSearchPayload {
@@ -68,9 +83,7 @@ interface QuoteSearchPayload {
     search_by_raw_query: {
       search_timeline: {
         timeline: {
-          instructions: Array<{
-            entries: Array<SearchTimelineItemEntry | SearchTimelineCursorEntry>;
-          }>;
+          instructions: Array<SearchTimelineEntriesInstruction | SearchTimelineReplaceCursorInstruction>;
         };
       };
     };
@@ -133,6 +146,13 @@ function makeTimelineItem(tweet: QuoteTweetResult): SearchTimelineItemEntry {
   };
 }
 
+function makeVisibilityWrappedTweet(tweet: QuoteTweetResult): QuoteTweetWithVisibilityResults {
+  return {
+    __typename: 'TweetWithVisibilityResults',
+    tweet,
+  };
+}
+
 function makeBottomCursor(value: string): SearchTimelineCursorEntry {
   return {
     content: {
@@ -140,6 +160,14 @@ function makeBottomCursor(value: string): SearchTimelineCursorEntry {
       cursorType: 'Bottom',
       value,
     },
+  };
+}
+
+function makeBottomCursorReplaceInstruction(value: string): SearchTimelineReplaceCursorInstruction {
+  return {
+    type: 'TimelineReplaceEntry',
+    entry: makeBottomCursor(value),
+    entry_id_to_replace: 'cursor-bottom-0',
   };
 }
 
@@ -192,6 +220,83 @@ test('parseQuoteSearchPage extracts only matching quoted tweet and bottom cursor
   assert.equal(parsed.participants.length, 1);
   assert.equal(parsed.participants[0]!.userId, '1');
   assert.equal(parsed.participants[0]!.sourceTexts[0], 'match');
+  assert.equal(parsed.bottomCursor, 'CURSOR_A');
+});
+
+test('parseQuoteSearchPage extracts bottom cursor from TimelineReplaceEntry', () => {
+  const payload: QuoteSearchPayload = {
+    data: {
+      search_by_raw_query: {
+        search_timeline: {
+          timeline: {
+            instructions: [
+              {
+                entries: [
+                  makeTimelineItem(
+                    makeTweet({
+                      userId: '1',
+                      screenName: 'riko',
+                      name: 'Riko',
+                      quotedStatusId: '999',
+                      fullText: 'match',
+                    })
+                  ),
+                ],
+              },
+              makeBottomCursorReplaceInstruction('CURSOR_REPLACE'),
+            ],
+          },
+        },
+      },
+    },
+  };
+
+  const parsed = parseQuoteSearchPage(payload, '999');
+  assert.equal(parsed.participants.length, 1);
+  assert.equal(parsed.bottomCursor, 'CURSOR_REPLACE');
+});
+
+test('parseQuoteSearchPage unwraps TweetWithVisibilityResults', () => {
+  const payload: QuoteSearchPayload = {
+    data: {
+      search_by_raw_query: {
+        search_timeline: {
+          timeline: {
+            instructions: [
+              {
+                entries: [
+                  {
+                    content: {
+                      entryType: 'TimelineTimelineItem',
+                      itemContent: {
+                        tweet_results: {
+                          result: makeVisibilityWrappedTweet(
+                            makeTweet({
+                              userId: '1',
+                              screenName: 'riko',
+                              name: 'Riko',
+                              quotedStatusId: '999',
+                              fullText: 'wrapped',
+                            })
+                          ),
+                        },
+                      },
+                    },
+                  },
+                  makeBottomCursor('CURSOR_A'),
+                ],
+              },
+            ],
+          },
+        },
+      },
+    },
+  };
+
+  const parsed = parseQuoteSearchPage(payload, '999');
+  assert.equal(parsed.participants.length, 1);
+  assert.equal(parsed.participants[0]!.userId, '1');
+  assert.equal(parsed.participants[0]!.sourceTexts[0], 'wrapped');
   assert.equal(parsed.bottomCursor, 'CURSOR_A');
 });
 
@@ -280,10 +385,10 @@ test('collectQuotes handles dedupe, author exclusion, and cursor loop safely', a
   });
 
   assert.deepEqual(result.participants.map((item) => item.screenName).sort(), ['riko', 'tabi']);
-  assert.equal(result.metrics.pagesFetched, 2);
-  assert.equal(result.metrics.totalCollectedRaw, 4);
-  assert.equal(result.metrics.duplicatesSkipped, 1);
-  assert.equal(result.metrics.excludedAuthorCount, 1);
+  assert.equal(result.metrics.pagesFetched, 8);
+  assert.equal(result.metrics.totalCollectedRaw, 16);
+  assert.equal(result.metrics.duplicatesSkipped, 10);
+  assert.equal(result.metrics.excludedAuthorCount, 4);
   assert.equal(result.metrics.loopDetected, true);
   assert.equal(result.metrics.terminationReason, 'cursor_cycle');
 });
@@ -403,7 +508,7 @@ test('collectQuotes ends with end_of_timeline when next cursor is absent without
     fetchPage,
   });
 
-  assert.equal(result.metrics.pagesFetched, 1);
+  assert.equal(result.metrics.pagesFetched, 2);
   assert.equal(result.metrics.totalUnique, 1);
   assert.equal(result.metrics.terminationReason, 'end_of_timeline');
 });
@@ -424,12 +529,490 @@ test('collectQuotes ends with invalid_or_empty_payload on schema mismatch', asyn
     },
   });
 
-  assert.equal(result.metrics.pagesFetched, 1);
+  assert.equal(result.metrics.pagesFetched, 2);
   assert.equal(result.metrics.schemaWarnings > 0, true);
   assert.equal(result.metrics.terminationReason, 'invalid_or_empty_payload');
-  assert.equal(progressCalls.length, 1);
+  assert.equal(progressCalls.length, 2);
   assert.equal(progressCalls[0]!.pagesFetched, 1);
   assert.equal(progressCalls[0]!.nextCursor, null);
+});
+
+test('collectQuotes uses Top search product by default and supports overrides', async () => {
+  const requests: Array<{ querySource?: string; product?: string }> = [];
+  const fetchPage: CollectQuotesFetchPage = async ({ querySource, product }) => {
+    requests.push({ querySource, product });
+    return makeResponse({
+      data: {
+        search_by_raw_query: {
+          search_timeline: {
+            timeline: {
+              instructions: [
+                {
+                  entries: [makeBottomCursor('CURSOR_1')],
+                },
+              ],
+            },
+          },
+        },
+      },
+    } as QuoteSearchPayload);
+  };
+
+  await collectQuotes({
+    tweetId: '999',
+    operationId: 'op',
+    fetchPage,
+    maxPages: 1,
+  });
+  await collectQuotes({
+    tweetId: '999',
+    operationId: 'op',
+    fetchPage,
+    maxPages: 1,
+    querySource: 'typed_query',
+    product: 'Top',
+  });
+
+  assert.equal(requests.length, 2);
+  assert.equal(requests[0]!.querySource, 'tdqt');
+  assert.equal(requests[0]!.product, 'Top');
+  assert.equal(requests[1]!.querySource, 'typed_query');
+  assert.equal(requests[1]!.product, 'Top');
+});
+
+test('collectQuotes stops with repeated_page when the same page signature repeats', async () => {
+  let callCount = 0;
+  const fetchPage: CollectQuotesFetchPage = async () => {
+    callCount += 1;
+    const payload: QuoteSearchPayload = {
+      data: {
+        search_by_raw_query: {
+          search_timeline: {
+            timeline: {
+              instructions: [
+                {
+                  entries: [
+                    makeTimelineItem(
+                      makeTweet({
+                        userId: '10',
+                        screenName: 'riko',
+                        name: 'Riko',
+                        quotedStatusId: '999',
+                        fullText: `same-${callCount}`,
+                      })
+                    ),
+                    makeBottomCursor(`CURSOR_${callCount}`),
+                  ],
+                },
+              ],
+            },
+          },
+        },
+      },
+    };
+    return makeResponse(payload);
+  };
+
+  const result = await collectQuotes({
+    tweetId: '999',
+    operationId: 'op',
+    fetchPage,
+    querySource: 'tdqt',
+    product: 'Top',
+    maxRepeatPageSignatures: 3,
+    maxNoGrowthPages: 10,
+  });
+
+  assert.equal(callCount, 6);
+  assert.equal(result.metrics.totalUnique, 1);
+  assert.equal(result.metrics.noGrowthStreak, 3);
+  assert.equal(result.metrics.loopDetected, true);
+  assert.equal(result.metrics.terminationReason, 'repeated_page');
+});
+
+test('collectQuotes stops with no_growth when unique count does not increase', async () => {
+  let callCount = 0;
+  const fetchPage: CollectQuotesFetchPage = async () => {
+    callCount += 1;
+    const payload: QuoteSearchPayload = {
+      data: {
+        search_by_raw_query: {
+          search_timeline: {
+            timeline: {
+              instructions: [
+                {
+                  entries: [
+                    makeTimelineItem(
+                      makeTweet({
+                        userId: '10',
+                        screenName: 'riko',
+                        name: 'Riko',
+                        quotedStatusId: '999',
+                        fullText: `same-${callCount}`,
+                      })
+                    ),
+                    makeBottomCursor(`CURSOR_${callCount}`),
+                  ],
+                },
+              ],
+            },
+          },
+        },
+      },
+    };
+    return makeResponse(payload);
+  };
+
+  const result = await collectQuotes({
+    tweetId: '999',
+    operationId: 'op',
+    fetchPage,
+    querySource: 'tdqt',
+    product: 'Top',
+    maxNoGrowthPages: 2,
+    maxRepeatPageSignatures: 99,
+  });
+
+  assert.equal(callCount, 5);
+  assert.equal(result.metrics.totalUnique, 1);
+  assert.equal(result.metrics.noGrowthStreak, 2);
+  assert.equal(result.metrics.loopDetected, false);
+  assert.equal(result.metrics.terminationReason, 'no_growth');
+});
+
+test('collectQuotes switches to next strategy after no_growth and keeps collecting', async () => {
+  const requests: Array<{ rawQuery?: string; querySource?: string; product?: string; cursor?: string | null }> = [];
+  let topCallCount = 0;
+  const fetchPage: CollectQuotesFetchPage = async ({ rawQuery, querySource, product, cursor }) => {
+    requests.push({ rawQuery, querySource, product, cursor });
+
+    const isPrimaryQuotedTop =
+      rawQuery === 'quoted_tweet_id:999' && querySource === 'tdqt' && product === 'Top';
+
+    if (isPrimaryQuotedTop) {
+      topCallCount += 1;
+      const payload: QuoteSearchPayload = {
+        data: {
+          search_by_raw_query: {
+            search_timeline: {
+              timeline: {
+                instructions: [
+                  {
+                    entries: [
+                      makeTimelineItem(
+                        makeTweet({
+                          userId: '10',
+                          screenName: 'riko',
+                          name: 'Riko',
+                          quotedStatusId: '999',
+                          fullText: topCallCount > 1 ? 'top-dup' : 'top-first',
+                        })
+                      ),
+                      makeBottomCursor(`CURSOR_TOP_${topCallCount}`),
+                    ],
+                  },
+                ],
+              },
+            },
+          },
+        },
+      };
+
+      return makeResponse(payload);
+    }
+
+    const payload: QuoteSearchPayload = {
+      data: {
+        search_by_raw_query: {
+          search_timeline: {
+            timeline: {
+              instructions: [
+                {
+                  entries: [
+                    makeTimelineItem(
+                      makeTweet({
+                        userId: '11',
+                        screenName: 'tabi',
+                        name: 'Tabi',
+                        quotedStatusId: '999',
+                        fullText: 'fallback-added',
+                      })
+                    ),
+                  ],
+                },
+              ],
+            },
+          },
+        },
+      },
+    };
+
+    return makeResponse(payload);
+  };
+
+  const result = await collectQuotes({
+    tweetId: '999',
+    authorScreenName: 'author',
+    operationId: 'op',
+    fetchPage,
+    maxNoGrowthPages: 2,
+    maxRepeatPageSignatures: 99,
+  });
+
+  const strategySet = new Set(requests.map((request) => `${request.querySource}:${request.product}:${request.rawQuery}`));
+  assert.equal(strategySet.has('tdqt:Top:quoted_tweet_id:999'), true);
+  assert.equal(strategySet.has('typed_query:Latest:quoted_tweet_id:999'), true);
+  assert.equal(result.metrics.totalUnique, 2);
+  assert.equal(result.metrics.terminationReason, 'end_of_timeline');
+});
+
+test('collectQuotes switches strategy after end_of_timeline on primary strategy', async () => {
+  const requests: Array<{ rawQuery?: string; querySource?: string; product?: string }> = [];
+  const fetchPage: CollectQuotesFetchPage = async ({ rawQuery, querySource, product }) => {
+    requests.push({ rawQuery, querySource, product });
+
+    const payload: QuoteSearchPayload =
+      querySource === 'tdqt' && product === 'Top'
+        ? {
+            data: {
+              search_by_raw_query: {
+                search_timeline: {
+                  timeline: {
+                    instructions: [
+                      {
+                        entries: [
+                          makeTimelineItem(
+                            makeTweet({
+                              userId: '10',
+                              screenName: 'riko',
+                              name: 'Riko',
+                              quotedStatusId: '999',
+                              fullText: 'top-only',
+                            })
+                          ),
+                        ],
+                      },
+                    ],
+                  },
+                },
+              },
+            },
+          }
+        : {
+            data: {
+              search_by_raw_query: {
+                search_timeline: {
+                  timeline: {
+                    instructions: [
+                      {
+                        entries: [
+                          makeTimelineItem(
+                            makeTweet({
+                              userId: '11',
+                              screenName: 'tabi',
+                              name: 'Tabi',
+                              quotedStatusId: '999',
+                              fullText: 'latest-fallback',
+                            })
+                          ),
+                        ],
+                      },
+                    ],
+                  },
+                },
+              },
+            },
+          };
+
+    return makeResponse(payload);
+  };
+
+  const result = await collectQuotes({
+    tweetId: '999',
+    operationId: 'op',
+    fetchPage,
+  });
+
+  assert.equal(requests.length, 2);
+  assert.equal(requests[0]!.querySource, 'tdqt');
+  assert.equal(requests[0]!.product, 'Top');
+  assert.equal(requests[1]!.querySource, 'typed_query');
+  assert.equal(requests[1]!.product, 'Latest');
+  assert.equal(result.metrics.totalUnique, 2);
+  assert.equal(result.metrics.terminationReason, 'end_of_timeline');
+});
+
+test('collectQuotes switches strategy after invalid_or_empty_payload on primary strategy', async () => {
+  const requests: Array<{ querySource?: string; product?: string }> = [];
+  const fetchPage: CollectQuotesFetchPage = async ({ querySource, product }) => {
+    requests.push({ querySource, product });
+
+    if (querySource === 'tdqt' && product === 'Top') {
+      return makeResponse({} as QuoteSearchPayload);
+    }
+
+    return makeResponse({
+      data: {
+        search_by_raw_query: {
+          search_timeline: {
+            timeline: {
+              instructions: [
+                {
+                  entries: [
+                    makeTimelineItem(
+                      makeTweet({
+                        userId: '12',
+                        screenName: 'mari',
+                        name: 'Mari',
+                        quotedStatusId: '999',
+                        fullText: 'fallback-after-invalid',
+                      })
+                    ),
+                  ],
+                },
+              ],
+            },
+          },
+        },
+      },
+    } as QuoteSearchPayload);
+  };
+
+  const result = await collectQuotes({
+    tweetId: '999',
+    operationId: 'op',
+    fetchPage,
+  });
+
+  assert.equal(requests.length, 2);
+  assert.equal(result.metrics.schemaWarnings > 0, true);
+  assert.equal(result.metrics.totalUnique, 1);
+  assert.equal(result.metrics.terminationReason, 'end_of_timeline');
+});
+
+test('collectQuotes switches strategy after repeated_page on primary strategy', async () => {
+  const requests: Array<{ querySource?: string; product?: string }> = [];
+  let topCalls = 0;
+  const fetchPage: CollectQuotesFetchPage = async ({ querySource, product }) => {
+    requests.push({ querySource, product });
+
+    if (querySource === 'tdqt' && product === 'Top') {
+      topCalls += 1;
+      return makeResponse({
+        data: {
+          search_by_raw_query: {
+            search_timeline: {
+              timeline: {
+                instructions: [
+                  {
+                    entries: [
+                      makeTimelineItem(
+                        makeTweet({
+                          userId: '10',
+                          screenName: 'riko',
+                          name: 'Riko',
+                          quotedStatusId: '999',
+                          fullText: `same-${topCalls}`,
+                        })
+                      ),
+                      makeBottomCursor(`CURSOR_TOP_${topCalls}`),
+                    ],
+                  },
+                ],
+              },
+            },
+          },
+        },
+      } as QuoteSearchPayload);
+    }
+
+    return makeResponse({
+      data: {
+        search_by_raw_query: {
+          search_timeline: {
+            timeline: {
+              instructions: [
+                {
+                  entries: [
+                    makeTimelineItem(
+                      makeTweet({
+                        userId: '13',
+                        screenName: 'nabi',
+                        name: 'Nabi',
+                        quotedStatusId: '999',
+                        fullText: 'fallback-after-repeat',
+                      })
+                    ),
+                  ],
+                },
+              ],
+            },
+          },
+        },
+      },
+    } as QuoteSearchPayload);
+  };
+
+  const result = await collectQuotes({
+    tweetId: '999',
+    operationId: 'op',
+    fetchPage,
+    maxRepeatPageSignatures: 2,
+    maxNoGrowthPages: 10,
+  });
+
+  assert.equal(topCalls, 2);
+  assert.equal(requests.length, 3);
+  assert.equal(result.metrics.loopDetected, true);
+  assert.equal(result.metrics.totalUnique, 2);
+  assert.equal(result.metrics.terminationReason, 'end_of_timeline');
+});
+
+test('collectQuotes keeps fallback strategies when only product override is provided', async () => {
+  const requests: Array<{ querySource?: string; product?: string }> = [];
+  const fetchPage: CollectQuotesFetchPage = async ({ querySource, product }) => {
+    requests.push({ querySource, product });
+
+    return makeResponse({
+      data: {
+        search_by_raw_query: {
+          search_timeline: {
+            timeline: {
+              instructions: [
+                {
+                  entries: [
+                    makeTimelineItem(
+                      makeTweet({
+                        userId: querySource === 'tdqt' ? '14' : '15',
+                        screenName: querySource === 'tdqt' ? 'override_a' : 'override_b',
+                        name: 'Override',
+                        quotedStatusId: '999',
+                        fullText: `override-${querySource}`,
+                      })
+                    ),
+                  ],
+                },
+              ],
+            },
+          },
+        },
+      },
+    } as QuoteSearchPayload);
+  };
+
+  const result = await collectQuotes({
+    tweetId: '999',
+    operationId: 'op',
+    fetchPage,
+    product: 'Latest',
+  });
+
+  assert.equal(requests.length, 2);
+  assert.equal(requests[0]!.querySource, 'tdqt');
+  assert.equal(requests[0]!.product, 'Latest');
+  assert.equal(requests[1]!.querySource, 'typed_query');
+  assert.equal(requests[1]!.product, 'Latest');
+  assert.equal(result.metrics.totalUnique, 2);
 });
 
 test('collectQuotes stops with max_pages when cursor keeps advancing', async () => {
@@ -479,6 +1062,28 @@ test('collectQuotes rejects invalid maxPages option', async () => {
         maxPages: 0,
       }),
     /maxPages must be a positive integer/
+  );
+
+  await assert.rejects(
+    () =>
+      collectQuotes({
+        tweetId: '999',
+        operationId: 'op',
+        fetchPage,
+        maxNoGrowthPages: 0,
+      }),
+    /maxNoGrowthPages must be a positive integer/
+  );
+
+  await assert.rejects(
+    () =>
+      collectQuotes({
+        tweetId: '999',
+        operationId: 'op',
+        fetchPage,
+        maxRepeatPageSignatures: 0,
+      }),
+    /maxRepeatPageSignatures must be a positive integer/
   );
 });
 
