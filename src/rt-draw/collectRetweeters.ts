@@ -13,6 +13,7 @@ const DEFAULT_MAX_PAGES = 200;
 const DEFAULT_MAX_NO_GROWTH_PAGES = 5;
 const DEFAULT_MAX_REPEAT_PAGE_SIGNATURES = 3;
 const DEFAULT_MAX_TRANSIENT_EMPTY_PAGES = 2;
+const DEFAULT_RANKED_FALLBACK_PAGE_SIZE = 100;
 
 const TERMINATION_REASONS = Object.freeze({
   UNKNOWN: 'unknown',
@@ -23,6 +24,7 @@ const TERMINATION_REASONS = Object.freeze({
   REPEATED_PAGE: 'repeated_page',
   NO_GROWTH: 'no_growth',
 });
+type TerminationReason = (typeof TERMINATION_REASONS)[keyof typeof TERMINATION_REASONS];
 
 interface RetweeterUserCore {
   screen_name?: unknown;
@@ -114,7 +116,13 @@ interface CollectionState {
   loopDetected: boolean;
   noGrowthStreak: number;
   transientEmptyRetries: number;
-  terminationReason: string;
+  terminationReason: TerminationReason;
+}
+
+interface RetweetersCollectionStrategy {
+  count: number;
+  enableRanking: boolean;
+  includePromotedContent: boolean;
 }
 
 type FetchRetweetersPageOptions = Omit<RetweetersUrlOptions, 'cursor'> & {
@@ -352,10 +360,36 @@ function isRepeatedSignature(
   return signatureCount >= threshold;
 }
 
-function getNoCursorTerminationReason(parsed: ParsedRetweetersPage): string {
+function getNoCursorTerminationReason(parsed: ParsedRetweetersPage): TerminationReason {
   return parsed.participants.length === 0 && parsed.warnings > 0
     ? TERMINATION_REASONS.INVALID_OR_EMPTY_PAYLOAD
     : TERMINATION_REASONS.END_OF_TIMELINE;
+}
+
+function createRetweetersStrategies(pageSize: number): RetweetersCollectionStrategy[] {
+  const safePageSize = pageSize;
+
+  return [
+    {
+      count: safePageSize,
+      enableRanking: false,
+      includePromotedContent: false,
+    },
+    {
+      count: Math.max(safePageSize, DEFAULT_RANKED_FALLBACK_PAGE_SIZE),
+      enableRanking: true,
+      includePromotedContent: true,
+    },
+  ];
+}
+
+function shouldFallbackToNextRtStrategy(reason: TerminationReason): boolean {
+  return (
+    reason === TERMINATION_REASONS.NO_GROWTH ||
+    reason === TERMINATION_REASONS.REPEATED_PAGE ||
+    reason === TERMINATION_REASONS.CURSOR_CYCLE ||
+    reason === TERMINATION_REASONS.INVALID_OR_EMPTY_PAYLOAD
+  );
 }
 
 function toMetrics(
@@ -414,102 +448,141 @@ async function collectRetweeters(
     'maxTransientEmptyPages'
   );
 
+  const strategies = createRetweetersStrategies(pageSize);
   const normalizedAuthor = normalizeHandle(authorScreenName);
   const participantsByUserId = new Map<string, RetweeterParticipant>();
-  const seenBottomCursors = new Set<string>();
-  const seenPageSignatures = new Map<string, number>();
   const state = createCollectionState();
 
-  let cursor: string | null = null;
-
-  while (true) {
-    if (state.pagesFetched >= safeMaxPages) {
-      state.terminationReason = TERMINATION_REASONS.MAX_PAGES;
+  let strategyIndex = 0;
+  while (strategyIndex < strategies.length) {
+    const strategy = strategies[strategyIndex];
+    if (!strategy) {
       break;
     }
 
-    state.pagesFetched += 1;
+    const seenBottomCursors = new Set<string>();
+    const seenPageSignatures = new Map<string, number>();
 
-    const { payload } = await fetchPage({
-      tweetId,
-      count: pageSize,
-      cursor,
-      operationId,
-      features,
-      headers,
-    });
+    let cursor: string | null = null;
+    let stageNoGrowthStreak = 0;
+    let stageTransientEmptyRetries = 0;
+    let stageTerminationReason: TerminationReason = TERMINATION_REASONS.UNKNOWN;
 
-    const parsed = parseRetweetersPage(payload);
-
-    if (isTransientEmptyPage(parsed)) {
-      if (state.transientEmptyRetries < safeMaxTransientEmptyPages) {
-        state.transientEmptyRetries += 1;
-        notifyProgress(onProgress, {
-          pagesFetched: state.pagesFetched,
-          totalCollectedRaw: state.totalCollectedRaw,
-          totalUnique: participantsByUserId.size,
-          addedOnPage: 0,
-          noGrowthStreak: state.noGrowthStreak,
-          nextCursor: cursor || null,
-          transientEmptyRetry: true,
-        });
-        continue;
+    while (true) {
+      if (state.pagesFetched >= safeMaxPages) {
+        state.terminationReason = TERMINATION_REASONS.MAX_PAGES;
+        break;
       }
-    } else {
-      state.transientEmptyRetries = 0;
+
+      state.pagesFetched += 1;
+
+      const { payload } = await fetchPage({
+        tweetId,
+        count: strategy.count,
+        enableRanking: strategy.enableRanking,
+        includePromotedContent: strategy.includePromotedContent,
+        cursor,
+        operationId,
+        features,
+        headers,
+      });
+
+      const parsed = parseRetweetersPage(payload);
+
+      if (isTransientEmptyPage(parsed)) {
+        if (stageTransientEmptyRetries < safeMaxTransientEmptyPages) {
+          stageTransientEmptyRetries += 1;
+          state.transientEmptyRetries = stageTransientEmptyRetries;
+          notifyProgress(onProgress, {
+            pagesFetched: state.pagesFetched,
+            totalCollectedRaw: state.totalCollectedRaw,
+            totalUnique: participantsByUserId.size,
+            addedOnPage: 0,
+            noGrowthStreak: stageNoGrowthStreak,
+            nextCursor: cursor || null,
+            transientEmptyRetry: true,
+          });
+          continue;
+        }
+      } else {
+        stageTransientEmptyRetries = 0;
+      }
+      state.transientEmptyRetries = stageTransientEmptyRetries;
+
+      state.schemaWarnings += parsed.warnings;
+      state.totalCollectedRaw += parsed.participants.length;
+
+      const { addedOnPage, duplicatesSkipped, excludedAuthorCount } = ingestParticipants({
+        parsedParticipants: parsed.participants,
+        participantsByUserId,
+        normalizedAuthor,
+      });
+      state.duplicatesSkipped += duplicatesSkipped;
+      state.excludedAuthorCount += excludedAuthorCount;
+      stageNoGrowthStreak = addedOnPage > 0 ? 0 : stageNoGrowthStreak + 1;
+      state.noGrowthStreak = stageNoGrowthStreak;
+
+      const repeatedSignatureDetected = isRepeatedSignature(
+        parsed.pageSignature,
+        seenPageSignatures,
+        safeMaxRepeatPageSignatures
+      );
+
+      notifyProgress(onProgress, {
+        pagesFetched: state.pagesFetched,
+        totalCollectedRaw: state.totalCollectedRaw,
+        totalUnique: participantsByUserId.size,
+        addedOnPage,
+        noGrowthStreak: stageNoGrowthStreak,
+        nextCursor: parsed.bottomCursor || null,
+      });
+
+      if (!parsed.bottomCursor) {
+        stageTerminationReason = getNoCursorTerminationReason(parsed);
+        break;
+      }
+
+      if (parsed.bottomCursor === cursor || seenBottomCursors.has(parsed.bottomCursor)) {
+        state.loopDetected = true;
+        stageTerminationReason = TERMINATION_REASONS.CURSOR_CYCLE;
+        break;
+      }
+
+      if (repeatedSignatureDetected) {
+        state.loopDetected = true;
+        stageTerminationReason = TERMINATION_REASONS.REPEATED_PAGE;
+        break;
+      }
+
+      if (stageNoGrowthStreak >= safeMaxNoGrowthPages) {
+        stageTerminationReason = TERMINATION_REASONS.NO_GROWTH;
+        break;
+      }
+
+      seenBottomCursors.add(parsed.bottomCursor);
+      cursor = parsed.bottomCursor;
     }
 
-    state.schemaWarnings += parsed.warnings;
-    state.totalCollectedRaw += parsed.participants.length;
+    state.noGrowthStreak = stageNoGrowthStreak;
+    state.transientEmptyRetries = stageTransientEmptyRetries;
 
-    const { addedOnPage, duplicatesSkipped, excludedAuthorCount } = ingestParticipants({
-      parsedParticipants: parsed.participants,
-      participantsByUserId,
-      normalizedAuthor,
-    });
-    state.duplicatesSkipped += duplicatesSkipped;
-    state.excludedAuthorCount += excludedAuthorCount;
-    state.noGrowthStreak = addedOnPage > 0 ? 0 : state.noGrowthStreak + 1;
-
-    const repeatedSignatureDetected = isRepeatedSignature(
-      parsed.pageSignature,
-      seenPageSignatures,
-      safeMaxRepeatPageSignatures
-    );
-
-    notifyProgress(onProgress, {
-      pagesFetched: state.pagesFetched,
-      totalCollectedRaw: state.totalCollectedRaw,
-      totalUnique: participantsByUserId.size,
-      addedOnPage,
-      noGrowthStreak: state.noGrowthStreak,
-      nextCursor: parsed.bottomCursor || null,
-    });
-
-    if (!parsed.bottomCursor) {
-      state.terminationReason = getNoCursorTerminationReason(parsed);
+    if (state.terminationReason === TERMINATION_REASONS.MAX_PAGES) {
       break;
     }
 
-    if (parsed.bottomCursor === cursor || seenBottomCursors.has(parsed.bottomCursor)) {
-      state.loopDetected = true;
-      state.terminationReason = TERMINATION_REASONS.CURSOR_CYCLE;
-      break;
+    const hasNextStrategy = strategyIndex + 1 < strategies.length;
+    if (hasNextStrategy && shouldFallbackToNextRtStrategy(stageTerminationReason)) {
+      strategyIndex += 1;
+      continue;
     }
 
-    if (repeatedSignatureDetected) {
-      state.loopDetected = true;
-      state.terminationReason = TERMINATION_REASONS.REPEATED_PAGE;
-      break;
-    }
+    state.terminationReason = stageTerminationReason;
+    break;
+  }
 
-    if (state.noGrowthStreak >= safeMaxNoGrowthPages) {
-      state.terminationReason = TERMINATION_REASONS.NO_GROWTH;
-      break;
-    }
-
-    seenBottomCursors.add(parsed.bottomCursor);
-    cursor = parsed.bottomCursor;
+  if (state.terminationReason === TERMINATION_REASONS.UNKNOWN) {
+    state.terminationReason =
+      state.pagesFetched === 0 ? TERMINATION_REASONS.INVALID_OR_EMPTY_PAYLOAD : TERMINATION_REASONS.END_OF_TIMELINE;
   }
 
   return {

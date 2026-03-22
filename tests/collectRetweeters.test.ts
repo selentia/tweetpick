@@ -195,7 +195,11 @@ test('collect multi page dedupe + author exclusion', async () => {
 
 test('cursor loop detection stops safely', async () => {
   const pageLoop = readFixture<RetweetersPayload>('page-loop.json');
-  const fetchPage: CollectRetweetersFetchPage = async () => makeResponse(pageLoop);
+  const requests: Array<{ enableRanking?: boolean; includePromotedContent?: boolean; count: number }> = [];
+  const fetchPage: CollectRetweetersFetchPage = async ({ enableRanking, includePromotedContent, count }) => {
+    requests.push({ enableRanking, includePromotedContent, count });
+    return makeResponse(pageLoop);
+  };
 
   const result = await collectRetweeters({
     tweetId: '123',
@@ -208,7 +212,8 @@ test('cursor loop detection stops safely', async () => {
   });
 
   assert.equal(result.metrics.loopDetected, true);
-  assert.equal(result.metrics.pagesFetched, 2);
+  assert.equal(result.metrics.pagesFetched, 4);
+  assert.equal(requests.some((item) => item.enableRanking === true && item.includePromotedContent === true), true);
 });
 
 test('rt-follow mode filters collected participants', async () => {
@@ -259,7 +264,11 @@ test('transient empty payload retries and recovers', async () => {
 });
 
 test('persistent empty payload stops with invalid_or_empty_payload', async () => {
-  const fetchPage: CollectRetweetersFetchPage = async () => makeResponse({});
+  let callCount = 0;
+  const fetchPage: CollectRetweetersFetchPage = async () => {
+    callCount += 1;
+    return makeResponse({});
+  };
 
   const result = await collectRetweeters({
     tweetId: '123',
@@ -274,7 +283,8 @@ test('persistent empty payload stops with invalid_or_empty_payload', async () =>
 
   assert.equal(result.participants.length, 0);
   assert.equal(result.metrics.terminationReason, 'invalid_or_empty_payload');
-  assert.equal(result.metrics.pagesFetched, 2);
+  assert.equal(result.metrics.pagesFetched, 4);
+  assert.equal(callCount, 4);
 });
 
 test('parseRetweetersPage handles malformed entries and schema warnings', () => {
@@ -395,7 +405,9 @@ test('collectRetweeters terminates by max_pages and reports progress callback', 
 
 test('collectRetweeters terminates on repeated page signatures', async () => {
   let seq = 0;
-  const fetchPage: CollectRetweetersFetchPage = async () => {
+  const requests: Array<{ enableRanking?: boolean; includePromotedContent?: boolean; count: number }> = [];
+  const fetchPage: CollectRetweetersFetchPage = async ({ enableRanking, includePromotedContent, count }) => {
+    requests.push({ enableRanking, includePromotedContent, count });
     seq += 1;
     return makeResponse(
       makePayload([
@@ -418,7 +430,8 @@ test('collectRetweeters terminates on repeated page signatures', async () => {
 
   assert.equal(result.metrics.terminationReason, 'repeated_page');
   assert.equal(result.metrics.loopDetected, true);
-  assert.equal(result.metrics.pagesFetched, 2);
+  assert.equal(result.metrics.pagesFetched, 4);
+  assert.equal(requests.some((item) => item.enableRanking === true && item.includePromotedContent === true), true);
 });
 
 test('collectRetweeters terminates on no-growth streak', async () => {
@@ -447,5 +460,257 @@ test('collectRetweeters terminates on no-growth streak', async () => {
 
   assert.equal(result.metrics.terminationReason, 'no_growth');
   assert.equal(result.metrics.noGrowthStreak, 1);
+  assert.equal(result.metrics.pagesFetched, 3);
+});
+
+test('collectRetweeters falls back to ranked strategy after no-growth and keeps new users', async () => {
+  const requests: Array<{
+    cursor?: string | null;
+    count: number;
+    enableRanking?: boolean;
+    includePromotedContent?: boolean;
+  }> = [];
+  let unrankedCalls = 0;
+  let rankedCalls = 0;
+
+  const fetchPage: CollectRetweetersFetchPage = async ({ cursor, count, enableRanking, includePromotedContent }) => {
+    requests.push({ cursor, count, enableRanking, includePromotedContent });
+
+    const isRanked = enableRanking === true && includePromotedContent === true;
+    if (!isRanked) {
+      unrankedCalls += 1;
+      if (unrankedCalls === 1) {
+        return makeResponse(
+          makePayload([
+            makeUserEntry(makeUser({ id: '1', screenName: 'riko', name: 'Riko' })),
+            makeBottomCursor('cursor-u1'),
+          ])
+        );
+      }
+      return makeResponse(
+        makePayload([
+          makeUserEntry(makeUser({ id: '1', screenName: 'riko', name: 'Riko' })),
+          makeBottomCursor('cursor-u2'),
+        ])
+      );
+    }
+
+    rankedCalls += 1;
+    if (rankedCalls === 1) {
+      return makeResponse(
+        makePayload([
+          makeUserEntry(makeUser({ id: '1', screenName: 'riko', name: 'Riko' })),
+          makeUserEntry(makeUser({ id: '2', screenName: 'nana', name: 'Nana' })),
+        ])
+      );
+    }
+
+    return makeResponse(makePayload([]));
+  };
+
+  const result = await collectRetweeters({
+    tweetId: '123',
+    authorScreenName: 'yuni',
+    pageSize: 20,
+    operationId: 'op',
+    features: {},
+    headers: {},
+    fetchPage,
+    maxNoGrowthPages: 1,
+    maxRepeatPageSignatures: 99,
+  });
+
+  assert.equal(result.metrics.terminationReason, 'end_of_timeline');
+  assert.equal(result.metrics.pagesFetched, 3);
+  assert.equal(result.metrics.totalUnique, 2);
+  assert.equal(result.metrics.duplicatesSkipped, 2);
+  assert.deepEqual(
+    result.participants.map((item) => item.screenName).sort(),
+    ['nana', 'riko']
+  );
+  assert.equal(requests.length, 3);
+  assert.equal(requests[0]!.enableRanking, false);
+  assert.equal(requests[0]!.includePromotedContent, false);
+  assert.equal(requests[0]!.count, 20);
+  assert.equal(requests[0]!.cursor, null);
+  assert.equal(requests[1]!.enableRanking, false);
+  assert.equal(requests[1]!.includePromotedContent, false);
+  assert.equal(requests[1]!.count, 20);
+  assert.equal(requests[1]!.cursor, 'cursor-u1');
+  assert.equal(requests[2]!.enableRanking, true);
+  assert.equal(requests[2]!.includePromotedContent, true);
+  assert.equal(requests[2]!.count, 100);
+  assert.equal(requests[2]!.cursor, null);
+});
+
+test('collectRetweeters uses pageSize when ranked fallback pageSize exceeds 100', async () => {
+  const requests: Array<{
+    cursor?: string | null;
+    count: number;
+    enableRanking?: boolean;
+    includePromotedContent?: boolean;
+  }> = [];
+  let unrankedCalls = 0;
+
+  const fetchPage: CollectRetweetersFetchPage = async ({ cursor, count, enableRanking, includePromotedContent }) => {
+    requests.push({ cursor, count, enableRanking, includePromotedContent });
+
+    const isRanked = enableRanking === true && includePromotedContent === true;
+    if (!isRanked) {
+      unrankedCalls += 1;
+      if (unrankedCalls === 1) {
+        return makeResponse(
+          makePayload([
+            makeUserEntry(makeUser({ id: '1', screenName: 'riko', name: 'Riko' })),
+            makeBottomCursor('cursor-u1'),
+          ])
+        );
+      }
+
+      return makeResponse(
+        makePayload([
+          makeUserEntry(makeUser({ id: '1', screenName: 'riko', name: 'Riko' })),
+          makeBottomCursor('cursor-u2'),
+        ])
+      );
+    }
+
+    return makeResponse(makePayload([]));
+  };
+
+  const result = await collectRetweeters({
+    tweetId: '123',
+    authorScreenName: 'yuni',
+    pageSize: 150,
+    operationId: 'op',
+    features: {},
+    headers: {},
+    fetchPage,
+    maxNoGrowthPages: 1,
+    maxRepeatPageSignatures: 99,
+  });
+
+  assert.equal(result.metrics.terminationReason, 'end_of_timeline');
+  assert.equal(result.metrics.pagesFetched, 3);
+  assert.equal(requests.length, 3);
+  assert.equal(requests[2]!.enableRanking, true);
+  assert.equal(requests[2]!.includePromotedContent, true);
+  assert.equal(requests[2]!.count, 150);
+});
+
+test('collectRetweeters does not fallback when primary strategy ends timeline', async () => {
+  const requests: Array<{ count: number; enableRanking?: boolean; includePromotedContent?: boolean }> = [];
+  const fetchPage: CollectRetweetersFetchPage = async ({ count, enableRanking, includePromotedContent }) => {
+    requests.push({ count, enableRanking, includePromotedContent });
+    return makeResponse(makePayload([makeUserEntry(makeUser({ id: '1', screenName: 'riko', name: 'Riko' }))]));
+  };
+
+  const result = await collectRetweeters({
+    tweetId: '123',
+    authorScreenName: 'yuni',
+    pageSize: 20,
+    operationId: 'op',
+    features: {},
+    headers: {},
+    fetchPage,
+  });
+
+  assert.equal(result.metrics.terminationReason, 'end_of_timeline');
+  assert.equal(result.metrics.pagesFetched, 1);
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0]!.enableRanking, false);
+  assert.equal(requests[0]!.includePromotedContent, false);
+  assert.equal(requests[0]!.count, 20);
+});
+
+test('collectRetweeters maxPages applies across strategies', async () => {
+  const requests: Array<{ count: number; enableRanking?: boolean; includePromotedContent?: boolean }> = [];
+  const fetchPage: CollectRetweetersFetchPage = async ({ count, enableRanking, includePromotedContent, cursor }) => {
+    requests.push({ count, enableRanking, includePromotedContent });
+    return makeResponse(
+      makePayload([
+        makeUserEntry(makeUser({ id: '1', screenName: 'riko', name: 'Riko' })),
+        makeBottomCursor(cursor ? 'cursor-2' : 'cursor-1'),
+      ])
+    );
+  };
+
+  const result = await collectRetweeters({
+    tweetId: '123',
+    authorScreenName: 'yuni',
+    pageSize: 20,
+    operationId: 'op',
+    features: {},
+    headers: {},
+    fetchPage,
+    maxPages: 2,
+    maxNoGrowthPages: 1,
+    maxRepeatPageSignatures: 99,
+  });
+
+  assert.equal(result.metrics.terminationReason, 'max_pages');
   assert.equal(result.metrics.pagesFetched, 2);
+  assert.equal(requests.length, 2);
+  assert.equal(requests.every((item) => item.enableRanking === false && item.includePromotedContent === false), true);
+});
+
+test('collectRetweeters shares maxPages budget after fallback starts', async () => {
+  const requests: Array<{
+    cursor?: string | null;
+    count: number;
+    enableRanking?: boolean;
+    includePromotedContent?: boolean;
+  }> = [];
+  let unrankedCalls = 0;
+
+  const fetchPage: CollectRetweetersFetchPage = async ({ cursor, count, enableRanking, includePromotedContent }) => {
+    requests.push({ cursor, count, enableRanking, includePromotedContent });
+    const isRanked = enableRanking === true && includePromotedContent === true;
+
+    if (!isRanked) {
+      unrankedCalls += 1;
+      if (unrankedCalls === 1) {
+        return makeResponse(
+          makePayload([
+            makeUserEntry(makeUser({ id: '1', screenName: 'riko', name: 'Riko' })),
+            makeBottomCursor('cursor-u1'),
+          ])
+        );
+      }
+
+      return makeResponse(
+        makePayload([
+          makeUserEntry(makeUser({ id: '1', screenName: 'riko', name: 'Riko' })),
+          makeBottomCursor('cursor-u2'),
+        ])
+      );
+    }
+
+    return makeResponse(
+      makePayload([
+        makeUserEntry(makeUser({ id: '2', screenName: 'nana', name: 'Nana' })),
+        makeBottomCursor('cursor-r1'),
+      ])
+    );
+  };
+
+  const result = await collectRetweeters({
+    tweetId: '123',
+    authorScreenName: 'yuni',
+    pageSize: 20,
+    operationId: 'op',
+    features: {},
+    headers: {},
+    fetchPage,
+    maxPages: 3,
+    maxNoGrowthPages: 1,
+    maxRepeatPageSignatures: 99,
+  });
+
+  assert.equal(result.metrics.terminationReason, 'max_pages');
+  assert.equal(result.metrics.pagesFetched, 3);
+  assert.equal(requests.length, 3);
+  assert.equal(requests[2]!.enableRanking, true);
+  assert.equal(requests[2]!.includePromotedContent, true);
+  assert.equal(result.metrics.totalUnique, 2);
 });

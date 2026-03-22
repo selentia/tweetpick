@@ -208,6 +208,8 @@ export interface RetweetersUrlOptions {
   tweetId: string;
   count: number;
   features?: Record<string, unknown>;
+  enableRanking?: boolean;
+  includePromotedContent?: boolean;
   cursor?: string | null;
 }
 

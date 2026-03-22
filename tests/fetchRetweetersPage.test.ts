@@ -21,7 +21,53 @@ test('buildRetweetersUrl includes variables and features', () => {
   assert.equal(variables.tweetId, '111');
   assert.equal(variables.count, 20);
   assert.equal(variables.cursor, 'abc');
+  assert.equal(variables.enableRanking, false);
+  assert.equal(variables.includePromotedContent, false);
   assert.equal(features.featureA, true);
+});
+
+test('buildRetweetersUrl supports ranking/promoted overrides', () => {
+  const url = buildRetweetersUrl({
+    operationId: 'op123',
+    tweetId: '111',
+    count: 100,
+    enableRanking: true,
+    includePromotedContent: true,
+  });
+
+  const parsed = new URL(url);
+  const variables = JSON.parse(parsed.searchParams.get('variables')!);
+
+  assert.equal(variables.enableRanking, true);
+  assert.equal(variables.includePromotedContent, true);
+  assert.equal(variables.count, 100);
+});
+
+test('fetchRetweetersPage forwards ranking options into request URL', async () => {
+  let capturedUrl = '';
+  const fetchImpl: FetchImpl = async (input) => {
+    capturedUrl = String(input);
+    return new Response(JSON.stringify({ data: { ok: true } }), { status: 200 });
+  };
+
+  const result = await fetchRetweetersPage({
+    tweetId: '111',
+    count: 40,
+    operationId: 'op123',
+    features: {},
+    enableRanking: true,
+    includePromotedContent: true,
+    fetchImpl,
+  });
+
+  assert.deepEqual(result.payload, { data: { ok: true } });
+  assert.equal(capturedUrl.length > 0, true);
+
+  const parsed = new URL(capturedUrl);
+  const variables = JSON.parse(parsed.searchParams.get('variables')!);
+  assert.equal(variables.enableRanking, true);
+  assert.equal(variables.includePromotedContent, true);
+  assert.equal(variables.count, 40);
 });
 
 test('retry once on 429 using x-rate-limit-reset', async () => {

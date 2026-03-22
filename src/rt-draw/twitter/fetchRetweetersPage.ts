@@ -20,7 +20,15 @@ function normalizeTimeoutMs(timeoutMs: number | string): number {
   return parsed;
 }
 
-function buildRetweetersUrl({ operationId, tweetId, count, features, cursor }: RetweetersUrlOptions): string {
+function buildRetweetersUrl({
+  operationId,
+  tweetId,
+  count,
+  features,
+  enableRanking = false,
+  includePromotedContent = false,
+  cursor,
+}: RetweetersUrlOptions): string {
   if (!operationId) {
     throw new Error('Retweeters operationId is required.');
   }
@@ -31,8 +39,8 @@ function buildRetweetersUrl({ operationId, tweetId, count, features, cursor }: R
   const variables: Record<string, unknown> = {
     tweetId: String(tweetId),
     count,
-    enableRanking: false,
-    includePromotedContent: false,
+    enableRanking,
+    includePromotedContent,
   };
 
   if (cursor) {
@@ -60,6 +68,8 @@ async function fetchRetweetersPage<TPayload = unknown>(
     cursor,
     operationId,
     features,
+    enableRanking = false,
+    includePromotedContent = false,
     headers,
     fetchImpl = globalThis.fetch,
     maxRetries = 3,
@@ -80,6 +90,8 @@ async function fetchRetweetersPage<TPayload = unknown>(
     tweetId,
     count,
     features,
+    enableRanking,
+    includePromotedContent,
     cursor,
   });
 
