@@ -19,8 +19,11 @@
     "test": "vitest",
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "build": "rimraf dist && node scripts/generate-win-icon.mjs && node scripts/sync-build-twitter-config.mjs && node scripts/sync-ipc-channels.mjs && node scripts/check-ipc-sync.mjs && npm run typecheck && tsc -p tsconfig.renderer.json && tsc-alias -p tsconfig.renderer.json && tsc -p tsconfig.main.json && tsc-alias -p tsconfig.main.json && node scripts/check-dist-module-format.mjs && node scripts/check-preload-sandbox-safety.mjs && node scripts/copy-renderer-assets.mjs",
-    "dist": "node scripts/run-dist.mjs",
+    "build:core": "rimraf dist && node scripts/sync-build-twitter-config.mjs && node scripts/sync-ipc-channels.mjs && node scripts/check-ipc-sync.mjs && npm run typecheck && tsc -p tsconfig.renderer.json && tsc-alias -p tsconfig.renderer.json && tsc -p tsconfig.main.json && tsc-alias -p tsconfig.main.json && node scripts/check-dist-module-format.mjs && node scripts/check-preload-sandbox-safety.mjs && node scripts/copy-renderer-assets.mjs",
+    "build": "npm run build:core",
+    "dist:win": "node scripts/generate-win-icon.mjs && node scripts/run-dist.mjs",
+    "dist:mac": "npm run build && electron-builder --mac zip --publish never",
+    "dist": "npm run dist:win",
     "verify": "npm run lint && npm run typecheck && node scripts/check-ipc-sync.mjs && npm run test:coverage"
   },
   "devDependencies": {
@@ -66,6 +69,11 @@
             "x64"
           ]
         }
+      ]
+    },
+    "mac": {
+      "target": [
+        "zip"
       ]
     },
     "extraResources": [

@@ -1,4 +1,4 @@
-name: Build & Release (Windows)
+name: Build & Release (Windows + macOS)
 
 on:
   push:
@@ -30,7 +30,7 @@ jobs:
         run: npm run verify
 
       - name: Build dist
-        run: npm run dist
+        run: npm run dist:win
         env:
           TWITTER_BEARER: ${{ secrets.TWITTER_BEARER || vars.TWITTER_BEARER }}
           TWITTER_RETWEETERS_OP_ID: ${{ secrets.TWITTER_RETWEETERS_OP_ID || vars.TWITTER_RETWEETERS_OP_ID }}
@@ -77,4 +77,68 @@ jobs:
             release/*.exe
             release/*.zip
             release/*.msi
+            release/*.sha256
+
+  build-macos:
+    needs: build-windows
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Verify
+        run: npm run verify
+
+      - name: Build dist
+        run: npm run dist:mac
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          TWITTER_BEARER: ${{ secrets.TWITTER_BEARER || vars.TWITTER_BEARER }}
+          TWITTER_RETWEETERS_OP_ID: ${{ secrets.TWITTER_RETWEETERS_OP_ID || vars.TWITTER_RETWEETERS_OP_ID }}
+          TWITTER_SEARCH_TIMELINE_OP_ID: ${{ secrets.TWITTER_SEARCH_TIMELINE_OP_ID || vars.TWITTER_SEARCH_TIMELINE_OP_ID }}
+          TWITTER_TWEET_DETAIL_OP_ID: ${{ secrets.TWITTER_TWEET_DETAIL_OP_ID || vars.TWITTER_TWEET_DETAIL_OP_ID }}
+          TWITTER_RETWEETERS_FEATURES_JSON: ${{ secrets.TWITTER_RETWEETERS_FEATURES_JSON || vars.TWITTER_RETWEETERS_FEATURES_JSON }}
+          TWITTER_TWEET_DETAIL_FIELD_TOGGLES_JSON: ${{ secrets.TWITTER_TWEET_DETAIL_FIELD_TOGGLES_JSON || vars.TWITTER_TWEET_DETAIL_FIELD_TOGGLES_JSON }}
+
+      - name: Generate release checksums
+        shell: bash
+        run: |
+          shopt -s nullglob
+          assets=(release/*.zip)
+
+          if [ ${#assets[@]} -eq 0 ]; then
+            echo "No macOS release assets found for checksum generation." >&2
+            exit 1
+          fi
+
+          for asset in "${assets[@]}"; do
+            hash="$(shasum -a 256 "$asset" | awk '{ print $1 }')"
+            printf "%s  %s\n" "$hash" "$(basename "$asset")" > "${asset}.sha256"
+            echo "Generated checksum: $(basename "$asset").sha256"
+          done
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-dist
+          path: |
+            release/*.zip
+            release/*.sha256
+
+      - name: Upload macOS assets to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release/*.zip
             release/*.sha256
