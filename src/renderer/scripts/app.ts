@@ -763,7 +763,6 @@ function buildCopyText(result: RtDrawResult) {
   lines.push(`기준 트윗: ${tweetLink}`);
   lines.push(`추첨 인원: ${formatCount(result.winnersRequested || winners.length)}`);
   lines.push(`참여자: ${formatCount(Number.isFinite(result.eligibleCount) ? result.eligibleCount : 0)}`);
-  lines.push(`추첨 시드: ${drawResult.seed || '-'}`);
   lines.push('');
   lines.push('당첨자 목록');
 
