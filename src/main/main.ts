@@ -580,9 +580,9 @@ function escapeHtml(value: unknown): string {
 function formatCountLabel(value: unknown): string {
   const number = Number(value);
   if (!Number.isFinite(number)) {
-    return '0?';
+    return '0명';
   }
-  return `${number.toLocaleString('ko-KR')}?`;
+  return `${number.toLocaleString('ko-KR')}명`;
 }
 
 function resolveResultImageData(rawResult: unknown): ResultImageData | null {
