@@ -52,11 +52,16 @@ const REQUIRED_TWITTER_ENV_VARS = Object.freeze({
   tweetDetailOperationId: 'TWITTER_TWEET_DETAIL_OP_ID',
 });
 
+const OPTIONAL_TWITTER_ENV_VARS = Object.freeze({
+  favoritersOperationId: 'TWITTER_FAVORITERS_OP_ID',
+});
+
 type JsonObject = Record<string, unknown>;
 
 interface TwitterConfigOptions {
   bearerToken?: string;
   retweetersOperationId?: string;
+  favoritersOperationId?: string;
   searchTimelineOperationId?: string;
   tweetDetailOperationId?: string;
   operationId?: string;
@@ -68,6 +73,7 @@ interface TwitterConfig {
   bearerToken: string;
   operationId: string;
   retweetersOperationId: string;
+  favoritersOperationId: string;
   searchTimelineOperationId: string;
   tweetDetailOperationId: string;
   features: JsonObject;
@@ -103,6 +109,7 @@ function resolveTwitterConfig(options: TwitterConfigOptions = {}): TwitterConfig
   const {
     bearerToken: bearerTokenOverride,
     retweetersOperationId: retweetersOperationIdOverride,
+    favoritersOperationId: favoritersOperationIdOverride,
     searchTimelineOperationId: searchTimelineOperationIdOverride,
     tweetDetailOperationId: tweetDetailOperationIdOverride,
     operationId: operationIdOverride,
@@ -116,6 +123,10 @@ function resolveTwitterConfig(options: TwitterConfigOptions = {}): TwitterConfig
     readNonEmptyString(retweetersOperationIdOverride) ||
     readNonEmptyString(operationIdOverride) ||
     readNonEmptyString(process.env[REQUIRED_TWITTER_ENV_VARS.retweetersOperationId]);
+  const favoritersOperationId =
+    readNonEmptyString(favoritersOperationIdOverride) ||
+    readNonEmptyString(process.env[OPTIONAL_TWITTER_ENV_VARS.favoritersOperationId]) ||
+    retweetersOperationId;
   const searchTimelineOperationId =
     readNonEmptyString(searchTimelineOperationIdOverride) ||
     readNonEmptyString(process.env[REQUIRED_TWITTER_ENV_VARS.searchTimelineOperationId]);
@@ -166,6 +177,7 @@ function resolveTwitterConfig(options: TwitterConfigOptions = {}): TwitterConfig
     bearerToken: bearerToken!,
     operationId: retweetersOperationId!,
     retweetersOperationId: retweetersOperationId!,
+    favoritersOperationId: favoritersOperationId!,
     searchTimelineOperationId: searchTimelineOperationId!,
     tweetDetailOperationId: tweetDetailOperationId!,
     features,

@@ -1,4 +1,4 @@
-export type SourceKey = 'rt' | 'quote' | 'reply';
+export type SourceKey = 'rt' | 'quote' | 'reply' | 'like';
 export type SourceMatchMode = 'all' | 'any';
 
 export type SourceSelection = Record<SourceKey, boolean>;
@@ -204,6 +204,16 @@ export interface RequestGraphqlPageOptions {
 }
 
 export interface RetweetersUrlOptions {
+  operationId: string;
+  tweetId: string;
+  count: number;
+  features?: Record<string, unknown>;
+  enableRanking?: boolean;
+  includePromotedContent?: boolean;
+  cursor?: string | null;
+}
+
+export interface FavoritersUrlOptions {
   operationId: string;
   tweetId: string;
   count: number;

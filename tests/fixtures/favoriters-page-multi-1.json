@@ -1,0 +1,80 @@
+{
+  "data": {
+    "favoriters_timeline": {
+      "timeline": {
+        "instructions": [
+          {
+            "type": "TimelineAddEntries",
+            "entries": [
+              {
+                "entryId": "entry-1",
+                "sortIndex": "3",
+                "content": {
+                  "__typename": "TimelineTimelineItem",
+                  "entryType": "TimelineTimelineItem",
+                  "itemContent": {
+                    "__typename": "TimelineUser",
+                    "user_results": {
+                      "result": {
+                        "__typename": "User",
+                        "rest_id": "200",
+                        "core": {
+                          "screen_name": "yuni",
+                          "name": "Yuni"
+                        },
+                        "relationship_perspectives": {
+                          "followed_by": true
+                        },
+                        "privacy": {
+                          "protected": false
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "entryId": "entry-2",
+                "sortIndex": "2",
+                "content": {
+                  "__typename": "TimelineTimelineItem",
+                  "entryType": "TimelineTimelineItem",
+                  "itemContent": {
+                    "__typename": "TimelineUser",
+                    "user_results": {
+                      "result": {
+                        "__typename": "User",
+                        "rest_id": "201",
+                        "core": {
+                          "screen_name": "riko",
+                          "name": "Riko"
+                        },
+                        "relationship_perspectives": {
+                          "followed_by": true
+                        },
+                        "privacy": {
+                          "protected": false
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "entryId": "cursor-bottom-1",
+                "sortIndex": "1",
+                "content": {
+                  "__typename": "TimelineTimelineCursor",
+                  "entryType": "TimelineTimelineCursor",
+                  "cursorType": "Bottom",
+                  "value": "cursor-1"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}
+

@@ -135,7 +135,7 @@ function ensureBakedTwitterConfig() {
   if (missing.length > 0) {
     throw new Error(
       `Build-time Twitter config has empty required fields: ${missing.join(', ')}. ` +
-        'Set TWITTER_BEARER, TWITTER_RETWEETERS_OP_ID, TWITTER_SEARCH_TIMELINE_OP_ID, TWITTER_TWEET_DETAIL_OP_ID in .env (local) or GitHub Actions env/secrets.'
+        'Set TWITTER_BEARER, TWITTER_RETWEETERS_OP_ID, TWITTER_SEARCH_TIMELINE_OP_ID, TWITTER_TWEET_DETAIL_OP_ID in .env (local) or GitHub Actions env/secrets. TWITTER_FAVORITERS_OP_ID is optional and falls back to TWITTER_RETWEETERS_OP_ID.'
     );
   }
 }

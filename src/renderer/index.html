@@ -217,6 +217,10 @@
                           <input id="source-reply" type="checkbox" />
                           <span>답글</span>
                         </label>
+                        <label class="check-line" for="source-like">
+                          <input id="source-like" type="checkbox" />
+                          <span>맘찍</span>
+                        </label>
                       </div>
 
                       <div class="check-row-set source-match-row">
@@ -340,6 +344,7 @@
                     <div class="stats-block">
                       <div class="stats-title">소스 통계</div>
                       <div id="source-stat-rt" class="stats-line">RT: -</div>
+                      <div id="source-stat-like" class="stats-line">맘찍: -</div>
                       <div id="source-stat-quote" class="stats-line">인용: -</div>
                       <div id="source-stat-reply" class="stats-line">답글: -</div>
                     </div>
@@ -368,9 +373,9 @@
           <button
             id="link-github"
             class="social-link-btn has-tooltip"
-            data-tooltip="깃허브 열기"
+            data-tooltip="Github 열기"
             type="button"
-            aria-label="깃허브 열기"
+            aria-label="Github 열기"
           >
             <img
               class="social-link-icon"

@@ -7,11 +7,13 @@ import * as rtDrawIndex from '@rt/index';
 const EXPECTED_FUNCTION_EXPORTS = [
   'resolveTwitterConfig',
   'buildEligiblePool',
+  'collectFavoriters',
   'collectQuotes',
   'collectReplies',
   'collectRetweeters',
   'drawWinners',
   'parseTweetUrl',
+  'fetchFavoritersPage',
   'fetchSearchTimelinePage',
   'fetchTweetDetailPage',
   'fetchRetweetersPage',

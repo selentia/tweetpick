@@ -1,0 +1,53 @@
+{
+  "data": {
+    "favoriters_timeline": {
+      "timeline": {
+        "instructions": [
+          {
+            "type": "TimelineAddEntries",
+            "entries": [
+              {
+                "entryId": "entry-1",
+                "sortIndex": "2",
+                "content": {
+                  "__typename": "TimelineTimelineItem",
+                  "entryType": "TimelineTimelineItem",
+                  "itemContent": {
+                    "__typename": "TimelineUser",
+                    "user_results": {
+                      "result": {
+                        "__typename": "User",
+                        "rest_id": "300",
+                        "core": {
+                          "screen_name": "lize",
+                          "name": "Lize"
+                        },
+                        "relationship_perspectives": {
+                          "followed_by": true
+                        },
+                        "privacy": {
+                          "protected": false
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "entryId": "cursor-bottom-loop",
+                "sortIndex": "1",
+                "content": {
+                  "__typename": "TimelineTimelineCursor",
+                  "entryType": "TimelineTimelineCursor",
+                  "cursorType": "Bottom",
+                  "value": "cursor-loop"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}
+

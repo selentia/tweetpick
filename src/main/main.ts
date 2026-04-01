@@ -6,11 +6,13 @@ import path from 'node:path';
 import {
   resolveTwitterConfig,
   buildEligiblePool,
+  collectFavoriters,
   collectQuotes,
   collectReplies,
   collectRetweeters,
   drawWinners,
   parseTweetUrl,
+  fetchFavoritersPage,
   fetchRetweetersPage,
   fetchSearchTimelinePage,
   fetchTweetDetailPage,
@@ -38,6 +40,7 @@ import type {
   SourceMatchMode,
   SourceSelection,
   SourceStat,
+  FavoritersUrlOptions,
   RetweetersUrlOptions,
   TweetDetailUrlOptions,
   WindowResizeHeightResponse,
@@ -79,6 +82,7 @@ interface BuildTwitterConfigFile {
   twitter?: {
     bearerToken?: string | null;
     retweetersOperationId?: string | null;
+    favoritersOperationId?: string | null;
     searchTimelineOperationId?: string | null;
     tweetDetailOperationId?: string | null;
     featuresJson?: string | null;
@@ -89,6 +93,7 @@ interface BuildTwitterConfigFile {
 interface BuildTwitterConfigOptions {
   bearerToken?: string;
   retweetersOperationId?: string;
+  favoritersOperationId?: string;
   searchTimelineOperationId?: string;
   tweetDetailOperationId?: string;
   featuresJson?: string;
@@ -119,6 +124,7 @@ function readBuildTwitterConfig(): BuildTwitterConfigOptions | null {
     return {
       bearerToken: readNonEmptyBuildConfigValue(twitter.bearerToken) ?? undefined,
       retweetersOperationId: readNonEmptyBuildConfigValue(twitter.retweetersOperationId) ?? undefined,
+      favoritersOperationId: readNonEmptyBuildConfigValue(twitter.favoritersOperationId) ?? undefined,
       searchTimelineOperationId: readNonEmptyBuildConfigValue(twitter.searchTimelineOperationId) ?? undefined,
       tweetDetailOperationId: readNonEmptyBuildConfigValue(twitter.tweetDetailOperationId) ?? undefined,
       featuresJson: readNonEmptyBuildConfigValue(twitter.featuresJson) ?? undefined,
@@ -144,6 +150,11 @@ interface ResultImageData {
 type AppWindow = BrowserWindow | null;
 
 type RetweetersFetchOptions = RetweetersUrlOptions & {
+  headers?: HeadersInit;
+  onRetry?: (retryInfo: RetryInfo) => void;
+};
+
+type FavoritersFetchOptions = FavoritersUrlOptions & {
   headers?: HeadersInit;
   onRetry?: (retryInfo: RetryInfo) => void;
 };
@@ -231,9 +242,10 @@ function parseSources(rawSources: unknown): SourceSelection {
     rt: safe.rt !== false,
     quote: safe.quote === true,
     reply: safe.reply === true,
+    like: safe.like === true,
   };
 
-  if (!parsed.rt && !parsed.quote && !parsed.reply) {
+  if (!parsed.rt && !parsed.quote && !parsed.reply && !parsed.like) {
     throw new Error('At least one source must be selected.');
   }
 
@@ -374,6 +386,7 @@ async function runRtDraw(input: unknown, sendProgress: (progress: DrawProgressEv
   const { tweetId, author } = parseTweetUrl(parsedInput.tweetUrl);
   const sourceResultByKey = {
     rt: createEmptyCollectionResult(),
+    like: createEmptyCollectionResult(),
     quote: createEmptyCollectionResult(),
     reply: createEmptyCollectionResult(),
   };
@@ -398,6 +411,25 @@ async function runRtDraw(input: unknown, sendProgress: (progress: DrawProgressEv
         }),
       onProgress: (progress: SourceCollectionProgress) => {
         emitSourceProgress(sendProgress, 'rt', progress);
+      },
+    });
+  }
+
+  if (parsedInput.sources.like) {
+    sourceResultByKey.like = await collectFavoriters({
+      tweetId,
+      authorScreenName: author,
+      pageSize: DEFAULT_RT_PAGE_SIZE,
+      operationId: config.favoritersOperationId || config.retweetersOperationId || config.operationId,
+      features: config.features,
+      headers,
+      fetchPage: (options: FavoritersFetchOptions) =>
+        fetchFavoritersPage({
+          ...options,
+          onRetry: (retryInfo: RetryInfo) => emitRetryProgress(sendProgress, 'like', retryInfo),
+        }),
+      onProgress: (progress: SourceCollectionProgress) => {
+        emitSourceProgress(sendProgress, 'like', progress);
       },
     });
   }
@@ -442,6 +474,7 @@ async function runRtDraw(input: unknown, sendProgress: (progress: DrawProgressEv
 
   const sourceParticipants = {
     rt: sourceResultByKey.rt.participants,
+    like: sourceResultByKey.like.participants,
     quote: sourceResultByKey.quote.participants,
     reply: sourceResultByKey.reply.participants,
   };
@@ -484,6 +517,7 @@ async function runRtDraw(input: unknown, sendProgress: (progress: DrawProgressEv
     keyword: parsedInput.filters.keyword,
     sourceStats: {
       rt: buildSourceStat('rt', parsedInput.sources.rt, sourceResultByKey.rt, pool.stats),
+      like: buildSourceStat('like', parsedInput.sources.like, sourceResultByKey.like, pool.stats),
       quote: buildSourceStat('quote', parsedInput.sources.quote, sourceResultByKey.quote, pool.stats),
       reply: buildSourceStat('reply', parsedInput.sources.reply, sourceResultByKey.reply, pool.stats),
     },

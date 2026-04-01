@@ -1,6 +1,6 @@
 import type { DrawFilterInput, RtParticipant, SourceMatchMode } from '@shared/rtDraw';
 
-const SOURCE_KEYS = Object.freeze(['rt', 'quote', 'reply'] as const);
+const SOURCE_KEYS = Object.freeze(['rt', 'quote', 'reply', 'like'] as const);
 const SOURCE_MATCH_MODES = Object.freeze({
   ALL: 'all',
   ANY: 'any',
@@ -12,6 +12,7 @@ interface SourceParticipantsInput {
   rt?: unknown;
   quote?: unknown;
   reply?: unknown;
+  like?: unknown;
 }
 
 interface BuildEligiblePoolOptions {
@@ -237,6 +238,7 @@ function mergeUserRecords(recordsBySource: Partial<Record<SourceKeyTuple, Saniti
       rt: Boolean(recordsBySource.rt),
       quote: Boolean(recordsBySource.quote),
       reply: Boolean(recordsBySource.reply),
+      like: Boolean(recordsBySource.like),
     },
     sourceTexts: {
       quote:
@@ -340,13 +342,15 @@ function buildEligiblePool(options: BuildEligiblePoolOptions): BuildEligiblePool
     rt: toSourceMap(sourceParticipants && sourceParticipants.rt),
     quote: toSourceMap(sourceParticipants && sourceParticipants.quote),
     reply: toSourceMap(sourceParticipants && sourceParticipants.reply),
+    like: toSourceMap(sourceParticipants && sourceParticipants.like),
   };
 
-  const authorExcludedBySource: Record<SourceKeyTuple, number> = { rt: 0, quote: 0, reply: 0 };
+  const authorExcludedBySource: Record<SourceKeyTuple, number> = { rt: 0, quote: 0, reply: 0, like: 0 };
   const sourceUniqueBeforeAuthor: Record<SourceKeyTuple, number> = {
     rt: sourceMaps.rt.size,
     quote: sourceMaps.quote.size,
     reply: sourceMaps.reply.size,
+    like: sourceMaps.like.size,
   };
 
   for (const source of SOURCE_KEYS) {
@@ -363,6 +367,7 @@ function buildEligiblePool(options: BuildEligiblePoolOptions): BuildEligiblePool
     rt: sourceMaps.rt.size,
     quote: sourceMaps.quote.size,
     reply: sourceMaps.reply.size,
+    like: sourceMaps.like.size,
   };
 
   const normalizedSourceMatchMode = toSourceMatchMode(sourceMatchMode);
@@ -377,6 +382,7 @@ function buildEligiblePool(options: BuildEligiblePoolOptions): BuildEligiblePool
       rt: sourceMaps.rt.get(userId) || null,
       quote: sourceMaps.quote.get(userId) || null,
       reply: sourceMaps.reply.get(userId) || null,
+      like: sourceMaps.like.get(userId) || null,
     });
 
     if (merged) {

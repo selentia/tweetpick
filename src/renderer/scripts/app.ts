@@ -60,6 +60,7 @@ const elements = {
   summaryWinners: requireElement('summary-winners'),
   summaryUnique: requireElement('summary-unique'),
   sourceStatRt: requireElement('source-stat-rt'),
+  sourceStatLike: requireElement('source-stat-like'),
   sourceStatQuote: requireElement('source-stat-quote'),
   sourceStatReply: requireElement('source-stat-reply'),
   filterStatIntersection: requireElement('filter-stat-intersection'),
@@ -72,6 +73,7 @@ const elements = {
   tweetUrl: requireElement('tweet-url'),
   winners: requireElement('winners'),
   sourceRt: requireElement('source-rt'),
+  sourceLike: requireElement('source-like'),
   sourceQuote: requireElement('source-quote'),
   sourceReply: requireElement('source-reply'),
   sourceMatchAny: requireElement('source-match-any'),
@@ -103,9 +105,10 @@ const RESULT_VISIBLE_ROWS_CAP = 10;
 const RESULT_STATS_HEIGHT = 118;
 
 const SOURCE_LABELS = Object.freeze({
-  rt: 'RT',
-  quote: 'Quote',
-  reply: 'Reply',
+  rt: '리트윗',
+  quote: '인용',
+  reply: '답글',
+  like: '맘찍',
 });
 
 const UI_TEXT = Object.freeze({
@@ -354,6 +357,7 @@ function validateForm({ focusFirst = false }: { focusFirst?: boolean } = {}): Fo
   const winners = Number(elements.winners.value);
   const sources = {
     rt: elements.sourceRt.checked,
+    like: elements.sourceLike.checked,
     quote: elements.sourceQuote.checked,
     reply: elements.sourceReply.checked,
   };
@@ -387,7 +391,7 @@ function validateForm({ focusFirst = false }: { focusFirst?: boolean } = {}): Fo
     };
   }
 
-  if (!sources.rt && !sources.quote && !sources.reply) {
+  if (!sources.rt && !sources.quote && !sources.reply && !sources.like) {
     setFormGlobalError(UI_TEXT.requiredSource);
     return {
       ok: false as const,
@@ -441,6 +445,7 @@ function bindFieldValidation() {
   };
 
   elements.sourceRt.addEventListener('change', clearGlobalError);
+  elements.sourceLike.addEventListener('change', clearGlobalError);
   elements.sourceQuote.addEventListener('change', () => {
     clearGlobalError();
     syncKeywordInputState();
@@ -466,6 +471,7 @@ function resetSummary() {
 
 function resetStats() {
   elements.sourceStatRt.textContent = '리트윗: -';
+  elements.sourceStatLike.textContent = '맘찍: -';
   elements.sourceStatQuote.textContent = '인용: -';
   elements.sourceStatReply.textContent = '답글: -';
   elements.filterStatIntersection.textContent = '소스 교집합: -';
@@ -640,6 +646,7 @@ function renderStats(result: RtDrawResult) {
   const filterStats = result.filterStats;
 
   elements.sourceStatRt.textContent = renderSourceStatLine('리트윗', sourceStats.rt);
+  elements.sourceStatLike.textContent = renderSourceStatLine('맘찍', sourceStats.like);
   elements.sourceStatQuote.textContent = renderSourceStatLine('인용', sourceStats.quote);
   elements.sourceStatReply.textContent = renderSourceStatLine('답글', sourceStats.reply);
 

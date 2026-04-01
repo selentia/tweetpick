@@ -15,6 +15,7 @@ const REQUIRED = Object.freeze({
 });
 
 const OPTIONAL = Object.freeze({
+  favoritersOperationId: 'TWITTER_FAVORITERS_OP_ID',
   featuresJson: 'TWITTER_RETWEETERS_FEATURES_JSON',
   fieldTogglesJson: 'TWITTER_TWEET_DETAIL_FIELD_TOGGLES_JSON',
 });
@@ -72,6 +73,7 @@ function buildTwitterConfig(env) {
   const twitter = {
     bearerToken: readNonEmptyString(env[REQUIRED.bearerToken]),
     retweetersOperationId: readNonEmptyString(env[REQUIRED.retweetersOperationId]),
+    favoritersOperationId: readNonEmptyString(env[OPTIONAL.favoritersOperationId]),
     searchTimelineOperationId: readNonEmptyString(env[REQUIRED.searchTimelineOperationId]),
     tweetDetailOperationId: readNonEmptyString(env[REQUIRED.tweetDetailOperationId]),
     featuresJson: readNonEmptyString(env[OPTIONAL.featuresJson]),

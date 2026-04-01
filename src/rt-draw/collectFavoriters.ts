@@ -1,0 +1,603 @@
+﻿import { fetchFavoritersPage } from '@rt/twitter/fetchFavoritersPage';
+import type {
+  GraphqlPageResponse,
+  FavoritersUrlOptions,
+  RetryHandlerInfo,
+  RtParticipant,
+  SourceCollectionMetrics,
+  SourceCollectionProgress,
+  SourceCollectionResult,
+} from '@shared/rtDraw';
+
+const DEFAULT_MAX_PAGES = 200;
+const DEFAULT_MAX_NO_GROWTH_PAGES = 5;
+const DEFAULT_MAX_REPEAT_PAGE_SIGNATURES = 3;
+const DEFAULT_MAX_TRANSIENT_EMPTY_PAGES = 2;
+const DEFAULT_RANKED_FALLBACK_PAGE_SIZE = 100;
+
+const TERMINATION_REASONS = Object.freeze({
+  UNKNOWN: 'unknown',
+  MAX_PAGES: 'max_pages',
+  END_OF_TIMELINE: 'end_of_timeline',
+  INVALID_OR_EMPTY_PAYLOAD: 'invalid_or_empty_payload',
+  CURSOR_CYCLE: 'cursor_cycle',
+  REPEATED_PAGE: 'repeated_page',
+  NO_GROWTH: 'no_growth',
+});
+type TerminationReason = (typeof TERMINATION_REASONS)[keyof typeof TERMINATION_REASONS];
+
+interface FavoriterUserCore {
+  screen_name?: unknown;
+  name?: unknown;
+}
+
+interface FavoriterUserLegacy {
+  screen_name?: unknown;
+  friends_count?: unknown;
+  followers_count?: unknown;
+  default_profile?: unknown;
+  default_profile_image?: unknown;
+}
+
+interface FavoriterRelationshipPerspectives {
+  followed_by?: unknown;
+  following?: unknown;
+}
+
+interface FavoriterPrivacy {
+  protected?: unknown;
+}
+
+interface FavoriterUserResult {
+  __typename?: unknown;
+  rest_id?: unknown;
+  core?: FavoriterUserCore | null;
+  legacy?: FavoriterUserLegacy | null;
+  relationship_perspectives?: FavoriterRelationshipPerspectives | null;
+  privacy?: FavoriterPrivacy | null;
+}
+
+interface FavoritersTimelineItemContent {
+  user_results?: {
+    result?: FavoriterUserResult | null;
+  } | null;
+}
+
+interface FavoritersEntryContent {
+  entryType?: unknown;
+  cursorType?: unknown;
+  value?: unknown;
+  itemContent?: FavoritersTimelineItemContent | null;
+}
+
+interface FavoritersTimelineEntry {
+  content?: FavoritersEntryContent | null;
+}
+
+interface FavoritersTimelineInstruction {
+  entries?: FavoritersTimelineEntry[] | null;
+}
+
+interface FavoritersPayload {
+  data?: {
+    favoriters_timeline?: {
+      timeline?: {
+        instructions?: FavoritersTimelineInstruction[] | null;
+      } | null;
+    } | null;
+  } | null;
+}
+
+interface FavoriterParticipant extends RtParticipant {
+  sourceTexts: string[];
+  protected: boolean;
+  raw: FavoriterUserResult;
+}
+
+interface ParsedFavoritersPage {
+  participants: FavoriterParticipant[];
+  bottomCursor: string | null;
+  pageSignature: string;
+  warnings: number;
+}
+
+interface IngestParticipantsResult {
+  addedOnPage: number;
+  duplicatesSkipped: number;
+  excludedAuthorCount: number;
+}
+
+interface CollectionState {
+  pagesFetched: number;
+  totalCollectedRaw: number;
+  duplicatesSkipped: number;
+  excludedAuthorCount: number;
+  schemaWarnings: number;
+  loopDetected: boolean;
+  noGrowthStreak: number;
+  transientEmptyRetries: number;
+  terminationReason: TerminationReason;
+}
+
+interface FavoritersCollectionStrategy {
+  count: number;
+  enableRanking: boolean;
+  includePromotedContent: boolean;
+}
+
+type FetchFavoritersPageOptions = Omit<FavoritersUrlOptions, 'cursor'> & {
+  cursor: string | null;
+  headers?: HeadersInit;
+  onRetry?: (retry: RetryHandlerInfo) => void;
+};
+
+type FavoritersFetcher = (options: FetchFavoritersPageOptions) => Promise<GraphqlPageResponse<FavoritersPayload>>;
+
+interface CollectFavoritersOptions {
+  tweetId: string;
+  authorScreenName?: string | null;
+  pageSize?: number;
+  operationId: string;
+  features?: Record<string, unknown>;
+  headers?: HeadersInit;
+  fetchPage?: FavoritersFetcher;
+  onProgress?: (payload: SourceCollectionProgress) => void;
+  maxPages?: number;
+  maxNoGrowthPages?: number;
+  maxRepeatPageSignatures?: number;
+  maxTransientEmptyPages?: number;
+}
+
+interface IngestParticipantsArgs {
+  parsedParticipants: FavoriterParticipant[];
+  participantsByUserId: Map<string, FavoriterParticipant>;
+  normalizedAuthor: string;
+}
+
+function normalizeHandle(handle: unknown): string {
+  if (!handle) {
+    return '';
+  }
+  return String(handle).trim().replace(/^@+/, '').toLowerCase();
+}
+
+function toNumberOrNull(value: unknown): number | null {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function toParticipant(user: FavoriterUserResult | null | undefined): FavoriterParticipant | null {
+  if (!user || (user.__typename && user.__typename !== 'User')) {
+    return null;
+  }
+
+  const legacy = user.legacy ?? null;
+  const relationship = user.relationship_perspectives ?? null;
+  const privacy = user.privacy ?? null;
+
+  const userId = user.rest_id ? String(user.rest_id) : '';
+  const screenName = user.core?.screen_name
+    ? String(user.core.screen_name)
+    : legacy?.screen_name
+      ? String(legacy.screen_name)
+      : '';
+
+  if (!userId || !screenName) {
+    return null;
+  }
+
+  return {
+    userId,
+    screenName,
+    name: user.core?.name ? String(user.core.name) : '',
+    followedByAuth: relationship?.followed_by === true,
+    followingAuth: relationship?.following === true,
+    followingCount: toNumberOrNull(legacy?.friends_count),
+    followersCount: toNumberOrNull(legacy?.followers_count),
+    defaultProfile: typeof legacy?.default_profile === 'boolean' ? legacy.default_profile : null,
+    defaultProfileImage: typeof legacy?.default_profile_image === 'boolean' ? legacy.default_profile_image : null,
+    sourceTexts: [],
+    protected: privacy?.protected === true,
+    raw: user,
+  };
+}
+
+function extractTimelineEntries(payload: FavoritersPayload | null | undefined): {
+  entries: FavoritersTimelineEntry[];
+  warnings: number;
+} {
+  const instructions = payload?.data?.favoriters_timeline?.timeline?.instructions;
+
+  if (!Array.isArray(instructions)) {
+    return {
+      entries: [],
+      warnings: 1,
+    };
+  }
+
+  const entries: FavoritersTimelineEntry[] = [];
+  for (const instruction of instructions) {
+    if (Array.isArray(instruction.entries)) {
+      entries.push(...instruction.entries);
+    }
+  }
+
+  return {
+    entries,
+    warnings: 0,
+  };
+}
+
+function parseFavoritersPage(payload: FavoritersPayload | null | undefined): ParsedFavoritersPage {
+  const { entries, warnings: entryWarnings } = extractTimelineEntries(payload);
+  let warnings = entryWarnings;
+  let bottomCursor: string | null = null;
+  const participants: FavoriterParticipant[] = [];
+
+  for (const entry of entries) {
+    const content = entry.content;
+    if (!content) {
+      continue;
+    }
+
+    if (content.entryType === 'TimelineTimelineCursor') {
+      if (content.cursorType === 'Bottom' && typeof content.value === 'string') {
+        bottomCursor = content.value;
+      }
+      continue;
+    }
+
+    if (content.entryType !== 'TimelineTimelineItem') {
+      continue;
+    }
+
+    const user = content.itemContent?.user_results?.result ?? null;
+    const participant = toParticipant(user);
+    if (!participant) {
+      warnings += 1;
+      continue;
+    }
+
+    participants.push(participant);
+  }
+
+  const pageSignature = participants.map((participant) => participant.userId).join(',');
+
+  return {
+    participants,
+    bottomCursor,
+    pageSignature,
+    warnings,
+  };
+}
+
+function readPositiveInt(value: unknown, fallback: number, label: string): number {
+  const raw = value == null ? fallback : value;
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new Error(`${label} must be a positive integer.`);
+  }
+  return parsed;
+}
+
+function readNonNegativeInt(value: unknown, fallback: number, label: string): number {
+  const raw = value == null ? fallback : value;
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    throw new Error(`${label} must be a non-negative integer.`);
+  }
+  return parsed;
+}
+
+function createCollectionState(): CollectionState {
+  return {
+    pagesFetched: 0,
+    totalCollectedRaw: 0,
+    duplicatesSkipped: 0,
+    excludedAuthorCount: 0,
+    schemaWarnings: 0,
+    loopDetected: false,
+    noGrowthStreak: 0,
+    transientEmptyRetries: 0,
+    terminationReason: TERMINATION_REASONS.UNKNOWN,
+  };
+}
+
+function notifyProgress(
+  onProgress: ((payload: SourceCollectionProgress) => void) | undefined,
+  payload: SourceCollectionProgress
+): void {
+  if (typeof onProgress === 'function') {
+    onProgress(payload);
+  }
+}
+
+function isTransientEmptyPage(parsed: ParsedFavoritersPage): boolean {
+  return parsed.participants.length === 0 && !parsed.bottomCursor && parsed.warnings > 0;
+}
+
+function ingestParticipants({
+  parsedParticipants,
+  participantsByUserId,
+  normalizedAuthor,
+}: IngestParticipantsArgs): IngestParticipantsResult {
+  const uniqueBefore = participantsByUserId.size;
+  let duplicatesSkipped = 0;
+  let excludedAuthorCount = 0;
+
+  for (const participant of parsedParticipants) {
+    if (normalizeHandle(participant.screenName) === normalizedAuthor) {
+      excludedAuthorCount += 1;
+      continue;
+    }
+
+    if (participantsByUserId.has(participant.userId)) {
+      duplicatesSkipped += 1;
+      continue;
+    }
+
+    participantsByUserId.set(participant.userId, participant);
+  }
+
+  return {
+    addedOnPage: participantsByUserId.size - uniqueBefore,
+    duplicatesSkipped,
+    excludedAuthorCount,
+  };
+}
+
+function isRepeatedSignature(
+  pageSignature: string,
+  seenPageSignatures: Map<string, number>,
+  threshold: number
+): boolean {
+  if (!pageSignature) {
+    return false;
+  }
+
+  const signatureCount = (seenPageSignatures.get(pageSignature) || 0) + 1;
+  seenPageSignatures.set(pageSignature, signatureCount);
+  return signatureCount >= threshold;
+}
+
+function getNoCursorTerminationReason(parsed: ParsedFavoritersPage): TerminationReason {
+  return parsed.participants.length === 0 && parsed.warnings > 0
+    ? TERMINATION_REASONS.INVALID_OR_EMPTY_PAYLOAD
+    : TERMINATION_REASONS.END_OF_TIMELINE;
+}
+
+function createFavoritersStrategies(pageSize: number): FavoritersCollectionStrategy[] {
+  const safePageSize = pageSize;
+
+  return [
+    {
+      count: safePageSize,
+      enableRanking: false,
+      includePromotedContent: false,
+    },
+    {
+      count: Math.max(safePageSize, DEFAULT_RANKED_FALLBACK_PAGE_SIZE),
+      enableRanking: true,
+      includePromotedContent: true,
+    },
+  ];
+}
+
+function shouldFallbackToNextLikeStrategy(reason: TerminationReason): boolean {
+  return (
+    reason === TERMINATION_REASONS.NO_GROWTH ||
+    reason === TERMINATION_REASONS.REPEATED_PAGE ||
+    reason === TERMINATION_REASONS.CURSOR_CYCLE ||
+    reason === TERMINATION_REASONS.INVALID_OR_EMPTY_PAYLOAD
+  );
+}
+
+function toMetrics(
+  state: CollectionState,
+  participantsByUserId: Map<string, FavoriterParticipant>
+): SourceCollectionMetrics {
+  return {
+    pagesFetched: state.pagesFetched,
+    totalCollectedRaw: state.totalCollectedRaw,
+    totalUnique: participantsByUserId.size,
+    duplicatesSkipped: state.duplicatesSkipped,
+    excludedAuthorCount: state.excludedAuthorCount,
+    schemaWarnings: state.schemaWarnings,
+    loopDetected: state.loopDetected,
+    noGrowthStreak: state.noGrowthStreak,
+    transientEmptyRetries: state.transientEmptyRetries,
+    terminationReason: state.terminationReason,
+  };
+}
+
+async function collectFavoriters(
+  options: CollectFavoritersOptions
+): Promise<SourceCollectionResult<FavoriterParticipant>> {
+  const {
+    tweetId,
+    authorScreenName,
+    pageSize = 20,
+    operationId,
+    features,
+    headers,
+    fetchPage = fetchFavoritersPage as FavoritersFetcher,
+    onProgress,
+    maxPages = DEFAULT_MAX_PAGES,
+    maxNoGrowthPages = DEFAULT_MAX_NO_GROWTH_PAGES,
+    maxRepeatPageSignatures = DEFAULT_MAX_REPEAT_PAGE_SIGNATURES,
+    maxTransientEmptyPages = DEFAULT_MAX_TRANSIENT_EMPTY_PAGES,
+  } = options;
+
+  if (!tweetId) {
+    throw new Error('tweetId is required for favoriter collection.');
+  }
+  if (!operationId) {
+    throw new Error('operationId is required for favoriter collection.');
+  }
+
+  const safeMaxPages = readPositiveInt(maxPages, DEFAULT_MAX_PAGES, 'maxPages');
+  const safeMaxNoGrowthPages = readPositiveInt(maxNoGrowthPages, DEFAULT_MAX_NO_GROWTH_PAGES, 'maxNoGrowthPages');
+  const safeMaxRepeatPageSignatures = readPositiveInt(
+    maxRepeatPageSignatures,
+    DEFAULT_MAX_REPEAT_PAGE_SIGNATURES,
+    'maxRepeatPageSignatures'
+  );
+  const safeMaxTransientEmptyPages = readNonNegativeInt(
+    maxTransientEmptyPages,
+    DEFAULT_MAX_TRANSIENT_EMPTY_PAGES,
+    'maxTransientEmptyPages'
+  );
+
+  const strategies = createFavoritersStrategies(pageSize);
+  const normalizedAuthor = normalizeHandle(authorScreenName);
+  const participantsByUserId = new Map<string, FavoriterParticipant>();
+  const state = createCollectionState();
+
+  let strategyIndex = 0;
+  while (strategyIndex < strategies.length) {
+    const strategy = strategies[strategyIndex];
+    if (!strategy) {
+      break;
+    }
+
+    const seenBottomCursors = new Set<string>();
+    const seenPageSignatures = new Map<string, number>();
+
+    let cursor: string | null = null;
+    let stageNoGrowthStreak = 0;
+    let stageTransientEmptyRetries = 0;
+    let stageTerminationReason: TerminationReason = TERMINATION_REASONS.UNKNOWN;
+
+    while (true) {
+      if (state.pagesFetched >= safeMaxPages) {
+        state.terminationReason = TERMINATION_REASONS.MAX_PAGES;
+        break;
+      }
+
+      state.pagesFetched += 1;
+
+      const { payload } = await fetchPage({
+        tweetId,
+        count: strategy.count,
+        enableRanking: strategy.enableRanking,
+        includePromotedContent: strategy.includePromotedContent,
+        cursor,
+        operationId,
+        features,
+        headers,
+      });
+
+      const parsed = parseFavoritersPage(payload);
+
+      if (isTransientEmptyPage(parsed)) {
+        if (stageTransientEmptyRetries < safeMaxTransientEmptyPages) {
+          stageTransientEmptyRetries += 1;
+          state.transientEmptyRetries = stageTransientEmptyRetries;
+          notifyProgress(onProgress, {
+            pagesFetched: state.pagesFetched,
+            totalCollectedRaw: state.totalCollectedRaw,
+            totalUnique: participantsByUserId.size,
+            addedOnPage: 0,
+            noGrowthStreak: stageNoGrowthStreak,
+            nextCursor: cursor || null,
+            transientEmptyRetry: true,
+          });
+          continue;
+        }
+      } else {
+        stageTransientEmptyRetries = 0;
+      }
+      state.transientEmptyRetries = stageTransientEmptyRetries;
+
+      state.schemaWarnings += parsed.warnings;
+      state.totalCollectedRaw += parsed.participants.length;
+
+      const { addedOnPage, duplicatesSkipped, excludedAuthorCount } = ingestParticipants({
+        parsedParticipants: parsed.participants,
+        participantsByUserId,
+        normalizedAuthor,
+      });
+      state.duplicatesSkipped += duplicatesSkipped;
+      state.excludedAuthorCount += excludedAuthorCount;
+      stageNoGrowthStreak = addedOnPage > 0 ? 0 : stageNoGrowthStreak + 1;
+      state.noGrowthStreak = stageNoGrowthStreak;
+
+      const repeatedSignatureDetected = isRepeatedSignature(
+        parsed.pageSignature,
+        seenPageSignatures,
+        safeMaxRepeatPageSignatures
+      );
+
+      notifyProgress(onProgress, {
+        pagesFetched: state.pagesFetched,
+        totalCollectedRaw: state.totalCollectedRaw,
+        totalUnique: participantsByUserId.size,
+        addedOnPage,
+        noGrowthStreak: stageNoGrowthStreak,
+        nextCursor: parsed.bottomCursor || null,
+      });
+
+      if (!parsed.bottomCursor) {
+        stageTerminationReason = getNoCursorTerminationReason(parsed);
+        break;
+      }
+
+      if (parsed.bottomCursor === cursor || seenBottomCursors.has(parsed.bottomCursor)) {
+        state.loopDetected = true;
+        stageTerminationReason = TERMINATION_REASONS.CURSOR_CYCLE;
+        break;
+      }
+
+      if (repeatedSignatureDetected) {
+        state.loopDetected = true;
+        stageTerminationReason = TERMINATION_REASONS.REPEATED_PAGE;
+        break;
+      }
+
+      if (stageNoGrowthStreak >= safeMaxNoGrowthPages) {
+        stageTerminationReason = TERMINATION_REASONS.NO_GROWTH;
+        break;
+      }
+
+      seenBottomCursors.add(parsed.bottomCursor);
+      cursor = parsed.bottomCursor;
+    }
+
+    state.noGrowthStreak = stageNoGrowthStreak;
+    state.transientEmptyRetries = stageTransientEmptyRetries;
+
+    if (state.terminationReason === TERMINATION_REASONS.MAX_PAGES) {
+      break;
+    }
+
+    const hasNextStrategy = strategyIndex + 1 < strategies.length;
+    if (hasNextStrategy && shouldFallbackToNextLikeStrategy(stageTerminationReason)) {
+      strategyIndex += 1;
+      continue;
+    }
+
+    state.terminationReason = stageTerminationReason;
+    break;
+  }
+
+  if (state.terminationReason === TERMINATION_REASONS.UNKNOWN) {
+    state.terminationReason =
+      state.pagesFetched === 0 ? TERMINATION_REASONS.INVALID_OR_EMPTY_PAYLOAD : TERMINATION_REASONS.END_OF_TIMELINE;
+  }
+
+  return {
+    participants: Array.from(participantsByUserId.values()),
+    metrics: toMetrics(state, participantsByUserId),
+  };
+}
+
+export {
+  DEFAULT_MAX_PAGES,
+  DEFAULT_MAX_NO_GROWTH_PAGES,
+  DEFAULT_MAX_REPEAT_PAGE_SIGNATURES,
+  DEFAULT_MAX_TRANSIENT_EMPTY_PAGES,
+  extractTimelineEntries,
+  parseFavoritersPage,
+  collectFavoriters,
+};
+

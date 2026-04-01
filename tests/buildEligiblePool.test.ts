@@ -323,3 +323,52 @@ test('buildEligiblePool excludes default profile and default profile image when 
   assert.equal(result.stats.afterProfileCount, 0);
   assert.equal(result.stats.excludedByProfile, 2);
 });
+
+test('buildEligiblePool includes like source in any-mode merge and does not apply keyword to like-only users', () => {
+  const result = buildEligiblePool({
+    sourceParticipants: {
+      rt: [],
+      like: [{ userId: '1', screenName: 'like_only' }],
+      quote: [{ userId: '2', screenName: 'quote_only', sourceTexts: ['no match text'] }],
+      reply: [],
+    },
+    selectedSources: { rt: false, like: true, quote: true, reply: false },
+    sourceMatchMode: SOURCE_MATCH_MODES.ANY,
+    authorScreenName: 'yuni',
+    keyword: 'burger',
+    filters: {},
+  });
+
+  assert.deepEqual(result.eligibleParticipants.map((participant) => participant.screenName), ['like_only']);
+  assert.equal(result.stats.sourceUniqueBeforeAuthor.like, 1);
+  assert.equal(result.stats.sourceUniqueAfterAuthor.like, 1);
+  assert.equal(result.stats.intersectionCount, 2);
+  assert.equal(result.stats.afterKeywordCount, 1);
+});
+
+test('buildEligiblePool supports all-mode intersection with like source', () => {
+  const result = buildEligiblePool({
+    sourceParticipants: {
+      rt: [],
+      like: [
+        { userId: '1', screenName: 'match_user' },
+        { userId: '2', screenName: 'no_match_user' },
+      ],
+      quote: [
+        { userId: '1', screenName: 'match_user', sourceTexts: ['burger in quote'] },
+        { userId: '2', screenName: 'no_match_user', sourceTexts: ['without keyword'] },
+      ],
+      reply: [],
+    },
+    selectedSources: { rt: false, like: true, quote: true, reply: false },
+    sourceMatchMode: SOURCE_MATCH_MODES.ALL,
+    authorScreenName: 'yuni',
+    keyword: 'burger',
+    filters: {},
+  });
+
+  assert.deepEqual(result.eligibleParticipants.map((participant) => participant.screenName), ['match_user']);
+  assert.equal(result.stats.intersectionCount, 2);
+  assert.equal(result.stats.afterKeywordCount, 1);
+  assert.equal(result.stats.excludedByKeyword, 1);
+});
