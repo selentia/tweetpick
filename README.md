@@ -1,7 +1,7 @@
 # TweetPick (트윗픽)
 
 ![Verify](https://img.shields.io/badge/verify-pass-brightgreen)
-![Coverage](https://img.shields.io/badge/coverage-97.10%25-brightgreen)
+![Coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/selentia/tweetpick/main/badges/coverage.json)
 ![Coverage Threshold](https://img.shields.io/badge/threshold-S%2FL%2FF%2085%25%20%7C%20B%2070%25-blue)
 
 ## 소개
@@ -83,10 +83,10 @@ shasum -a 256 "TweetPick.zip"
 - 필수
   - `TWITTER_BEARER`
   - `TWITTER_RETWEETERS_OP_ID`
+  - `TWITTER_FAVORITERS_OP_ID`
   - `TWITTER_SEARCH_TIMELINE_OP_ID`
   - `TWITTER_TWEET_DETAIL_OP_ID`
 - 선택
-  - `TWITTER_FAVORITERS_OP_ID` (미설정 시 `TWITTER_RETWEETERS_OP_ID` fallback)
   - `TWITTER_RETWEETERS_FEATURES_JSON`
   - `TWITTER_TWEET_DETAIL_FIELD_TOGGLES_JSON`
 
@@ -129,6 +129,13 @@ npm run dist:mac
 ## CI/CD
 
 GitHub Actions 워크플로:
+
+- Actions env/secrets 필수 키:
+  - `TWITTER_BEARER`
+  - `TWITTER_RETWEETERS_OP_ID`
+  - `TWITTER_FAVORITERS_OP_ID`
+  - `TWITTER_SEARCH_TIMELINE_OP_ID`
+  - `TWITTER_TWEET_DETAIL_OP_ID`
 
 - `CI (Verify + Build)` (`.github/workflows/ci.yml`)
   - 트리거: `main` 브랜치 push, `main` 대상 PR, `v*` 태그 push
