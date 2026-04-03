@@ -9,7 +9,7 @@ export default defineConfig({
     include: ['tests/**/*.test.ts'],
     coverage: {
       provider: 'v8',
-      reporter: ['text', 'html'],
+      reporter: ['text', 'html', 'json-summary'],
       include: ['src/rt-draw/**/*.ts', 'src/main/messageCatalog.ts'],
       thresholds: {
         statements: 85,
