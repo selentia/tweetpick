@@ -12,9 +12,9 @@ import {
 const TWITTER_ENV_KEYS = [
   REQUIRED_TWITTER_ENV_VARS.bearerToken,
   REQUIRED_TWITTER_ENV_VARS.retweetersOperationId,
+  REQUIRED_TWITTER_ENV_VARS.favoritersOperationId,
   REQUIRED_TWITTER_ENV_VARS.searchTimelineOperationId,
   REQUIRED_TWITTER_ENV_VARS.tweetDetailOperationId,
-  'TWITTER_FAVORITERS_OP_ID',
   'TWITTER_RETWEETERS_FEATURES_JSON',
   'TWITTER_TWEET_DETAIL_FIELD_TOGGLES_JSON',
 ] as const;
@@ -67,6 +67,7 @@ test('resolveTwitterConfig throws with missing required env var names', () => {
       assert.ok(error instanceof Error);
       assert.match(error.message, /TWITTER_BEARER/);
       assert.match(error.message, /TWITTER_RETWEETERS_OP_ID/);
+      assert.match(error.message, /TWITTER_FAVORITERS_OP_ID/);
       assert.match(error.message, /TWITTER_SEARCH_TIMELINE_OP_ID/);
       assert.match(error.message, /TWITTER_TWEET_DETAIL_OP_ID/);
       return true;
@@ -110,12 +111,13 @@ test('resolveTwitterConfig lets options override env values', () => {
   assert.equal(config.tweetDetailOperationId, 'override-detail-op');
 });
 
-test('resolveTwitterConfig falls back from operationId to retweeters operation id', () => {
+test('resolveTwitterConfig falls back from operationId to retweeters/favoriters operation ids', () => {
   savedEnvForTest = captureEnv();
   process.env.TWITTER_BEARER = 'env-bearer';
   process.env.TWITTER_SEARCH_TIMELINE_OP_ID = 'env-search-op';
   process.env.TWITTER_TWEET_DETAIL_OP_ID = 'env-detail-op';
   delete process.env.TWITTER_RETWEETERS_OP_ID;
+  delete process.env.TWITTER_FAVORITERS_OP_ID;
 
   const config = resolveTwitterConfig({
     operationId: 'operation-id-fallback',
@@ -126,7 +128,7 @@ test('resolveTwitterConfig falls back from operationId to retweeters operation i
   assert.equal(config.favoritersOperationId, 'operation-id-fallback');
 });
 
-test('resolveTwitterConfig falls back favoriters op id to retweeters op id when optional env is missing', () => {
+test('resolveTwitterConfig throws when favoriters op id is missing without operationId override', () => {
   savedEnvForTest = captureEnv();
   process.env.TWITTER_BEARER = 'env-bearer';
   process.env.TWITTER_RETWEETERS_OP_ID = 'env-retweeters-op';
@@ -134,10 +136,7 @@ test('resolveTwitterConfig falls back favoriters op id to retweeters op id when 
   process.env.TWITTER_TWEET_DETAIL_OP_ID = 'env-detail-op';
   delete process.env.TWITTER_FAVORITERS_OP_ID;
 
-  const config = resolveTwitterConfig();
-
-  assert.equal(config.retweetersOperationId, 'env-retweeters-op');
-  assert.equal(config.favoritersOperationId, 'env-retweeters-op');
+  assert.throws(() => resolveTwitterConfig(), /TWITTER_FAVORITERS_OP_ID/);
 });
 
 test('resolveTwitterConfig parses features and field toggles from object overrides', () => {

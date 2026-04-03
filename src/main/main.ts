@@ -401,7 +401,7 @@ async function runRtDraw(input: unknown, sendProgress: (progress: DrawProgressEv
       tweetId,
       authorScreenName: author,
       pageSize: DEFAULT_RT_PAGE_SIZE,
-      operationId: config.retweetersOperationId || config.operationId,
+      operationId: config.retweetersOperationId,
       features: config.features,
       headers,
       fetchPage: (options: RetweetersFetchOptions) =>
@@ -420,7 +420,7 @@ async function runRtDraw(input: unknown, sendProgress: (progress: DrawProgressEv
       tweetId,
       authorScreenName: author,
       pageSize: DEFAULT_RT_PAGE_SIZE,
-      operationId: config.favoritersOperationId || config.retweetersOperationId || config.operationId,
+      operationId: config.favoritersOperationId,
       features: config.features,
       headers,
       fetchPage: (options: FavoritersFetchOptions) =>

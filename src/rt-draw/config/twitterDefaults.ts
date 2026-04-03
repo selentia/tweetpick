@@ -48,12 +48,14 @@ const DEFAULT_TWEET_DETAIL_FIELD_TOGGLES = Object.freeze({
 const REQUIRED_TWITTER_ENV_VARS = Object.freeze({
   bearerToken: 'TWITTER_BEARER',
   retweetersOperationId: 'TWITTER_RETWEETERS_OP_ID',
+  favoritersOperationId: 'TWITTER_FAVORITERS_OP_ID',
   searchTimelineOperationId: 'TWITTER_SEARCH_TIMELINE_OP_ID',
   tweetDetailOperationId: 'TWITTER_TWEET_DETAIL_OP_ID',
 });
 
 const OPTIONAL_TWITTER_ENV_VARS = Object.freeze({
-  favoritersOperationId: 'TWITTER_FAVORITERS_OP_ID',
+  featuresJson: 'TWITTER_RETWEETERS_FEATURES_JSON',
+  fieldTogglesJson: 'TWITTER_TWEET_DETAIL_FIELD_TOGGLES_JSON',
 });
 
 type JsonObject = Record<string, unknown>;
@@ -125,8 +127,8 @@ function resolveTwitterConfig(options: TwitterConfigOptions = {}): TwitterConfig
     readNonEmptyString(process.env[REQUIRED_TWITTER_ENV_VARS.retweetersOperationId]);
   const favoritersOperationId =
     readNonEmptyString(favoritersOperationIdOverride) ||
-    readNonEmptyString(process.env[OPTIONAL_TWITTER_ENV_VARS.favoritersOperationId]) ||
-    retweetersOperationId;
+    readNonEmptyString(operationIdOverride) ||
+    readNonEmptyString(process.env[REQUIRED_TWITTER_ENV_VARS.favoritersOperationId]);
   const searchTimelineOperationId =
     readNonEmptyString(searchTimelineOperationIdOverride) ||
     readNonEmptyString(process.env[REQUIRED_TWITTER_ENV_VARS.searchTimelineOperationId]);
@@ -140,6 +142,9 @@ function resolveTwitterConfig(options: TwitterConfigOptions = {}): TwitterConfig
   }
   if (!retweetersOperationId) {
     missingEnvVars.push(REQUIRED_TWITTER_ENV_VARS.retweetersOperationId);
+  }
+  if (!favoritersOperationId) {
+    missingEnvVars.push(REQUIRED_TWITTER_ENV_VARS.favoritersOperationId);
   }
   if (!searchTimelineOperationId) {
     missingEnvVars.push(REQUIRED_TWITTER_ENV_VARS.searchTimelineOperationId);
@@ -159,17 +164,20 @@ function resolveTwitterConfig(options: TwitterConfigOptions = {}): TwitterConfig
   let features: JsonObject = DEFAULT_RETWEETERS_FEATURES;
   if (featuresJsonOverride) {
     features = parseFeaturesJson(featuresJsonOverride, '--features-json');
-  } else if (process.env.TWITTER_RETWEETERS_FEATURES_JSON) {
-    features = parseFeaturesJson(process.env.TWITTER_RETWEETERS_FEATURES_JSON, 'TWITTER_RETWEETERS_FEATURES_JSON');
+  } else if (process.env[OPTIONAL_TWITTER_ENV_VARS.featuresJson]) {
+    features = parseFeaturesJson(
+      process.env[OPTIONAL_TWITTER_ENV_VARS.featuresJson] as string,
+      OPTIONAL_TWITTER_ENV_VARS.featuresJson
+    );
   }
 
   let fieldToggles: JsonObject = DEFAULT_TWEET_DETAIL_FIELD_TOGGLES;
   if (fieldTogglesJsonOverride) {
     fieldToggles = parseFeaturesJson(fieldTogglesJsonOverride, '--field-toggles-json');
-  } else if (process.env.TWITTER_TWEET_DETAIL_FIELD_TOGGLES_JSON) {
+  } else if (process.env[OPTIONAL_TWITTER_ENV_VARS.fieldTogglesJson]) {
     fieldToggles = parseFeaturesJson(
-      process.env.TWITTER_TWEET_DETAIL_FIELD_TOGGLES_JSON,
-      'TWITTER_TWEET_DETAIL_FIELD_TOGGLES_JSON'
+      process.env[OPTIONAL_TWITTER_ENV_VARS.fieldTogglesJson] as string,
+      OPTIONAL_TWITTER_ENV_VARS.fieldTogglesJson
     );
   }
 

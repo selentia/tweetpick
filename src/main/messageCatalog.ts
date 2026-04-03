@@ -24,7 +24,7 @@ const ERROR_MESSAGE_RULES: ReadonlyArray<readonly [string, string]> = Object.fre
   ['Not enough participants', '추첨 가능한 참여자가 부족합니다. 당첨 인원을 줄여 주세요.'],
   [
     'Missing required Twitter configuration',
-    'Twitter 설정 env가 누락되었습니다. .env 파일에 TWITTER_BEARER, TWITTER_RETWEETERS_OP_ID, TWITTER_SEARCH_TIMELINE_OP_ID, TWITTER_TWEET_DETAIL_OP_ID를 설정해 주세요.',
+    'Twitter 설정 env가 누락되었습니다. .env 파일에 TWITTER_BEARER, TWITTER_RETWEETERS_OP_ID, TWITTER_FAVORITERS_OP_ID, TWITTER_SEARCH_TIMELINE_OP_ID, TWITTER_TWEET_DETAIL_OP_ID를 설정해 주세요.',
   ],
   ['requestTimeoutMs must be a positive integer', '내부 요청 설정이 올바르지 않습니다.'],
 ]);

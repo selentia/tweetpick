@@ -10,12 +10,12 @@ const outputPath = path.join(buildDir, 'twitter-config.json');
 const REQUIRED = Object.freeze({
   bearerToken: 'TWITTER_BEARER',
   retweetersOperationId: 'TWITTER_RETWEETERS_OP_ID',
+  favoritersOperationId: 'TWITTER_FAVORITERS_OP_ID',
   searchTimelineOperationId: 'TWITTER_SEARCH_TIMELINE_OP_ID',
   tweetDetailOperationId: 'TWITTER_TWEET_DETAIL_OP_ID',
 });
 
 const OPTIONAL = Object.freeze({
-  favoritersOperationId: 'TWITTER_FAVORITERS_OP_ID',
   featuresJson: 'TWITTER_RETWEETERS_FEATURES_JSON',
   fieldTogglesJson: 'TWITTER_TWEET_DETAIL_FIELD_TOGGLES_JSON',
 });
@@ -73,7 +73,7 @@ function buildTwitterConfig(env) {
   const twitter = {
     bearerToken: readNonEmptyString(env[REQUIRED.bearerToken]),
     retweetersOperationId: readNonEmptyString(env[REQUIRED.retweetersOperationId]),
-    favoritersOperationId: readNonEmptyString(env[OPTIONAL.favoritersOperationId]),
+    favoritersOperationId: readNonEmptyString(env[REQUIRED.favoritersOperationId]),
     searchTimelineOperationId: readNonEmptyString(env[REQUIRED.searchTimelineOperationId]),
     tweetDetailOperationId: readNonEmptyString(env[REQUIRED.tweetDetailOperationId]),
     featuresJson: readNonEmptyString(env[OPTIONAL.featuresJson]),
