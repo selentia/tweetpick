@@ -9,7 +9,7 @@ on:
       - main
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   verify-and-build:
@@ -36,7 +36,29 @@ jobs:
         env:
           TWITTER_BEARER: ${{ secrets.TWITTER_BEARER || vars.TWITTER_BEARER }}
           TWITTER_RETWEETERS_OP_ID: ${{ secrets.TWITTER_RETWEETERS_OP_ID || vars.TWITTER_RETWEETERS_OP_ID }}
+          TWITTER_FAVORITERS_OP_ID: ${{ secrets.TWITTER_FAVORITERS_OP_ID || vars.TWITTER_FAVORITERS_OP_ID }}
           TWITTER_SEARCH_TIMELINE_OP_ID: ${{ secrets.TWITTER_SEARCH_TIMELINE_OP_ID || vars.TWITTER_SEARCH_TIMELINE_OP_ID }}
           TWITTER_TWEET_DETAIL_OP_ID: ${{ secrets.TWITTER_TWEET_DETAIL_OP_ID || vars.TWITTER_TWEET_DETAIL_OP_ID }}
           TWITTER_RETWEETERS_FEATURES_JSON: ${{ secrets.TWITTER_RETWEETERS_FEATURES_JSON || vars.TWITTER_RETWEETERS_FEATURES_JSON }}
           TWITTER_TWEET_DETAIL_FIELD_TOGGLES_JSON: ${{ secrets.TWITTER_TWEET_DETAIL_FIELD_TOGGLES_JSON || vars.TWITTER_TWEET_DETAIL_FIELD_TOGGLES_JSON }}
+
+      - name: Update coverage badge payload
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: node scripts/update-coverage-badge.mjs
+
+      - name: Commit coverage badge
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add badges/coverage.json
+
+          git diff --cached --quiet
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "No coverage badge changes."
+            exit 0
+          }
+
+          git commit -m "chore(ci): update coverage badge [skip ci]"
+          git push origin "HEAD:$env:GITHUB_REF_NAME"
